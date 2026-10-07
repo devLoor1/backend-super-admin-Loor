@@ -9,12 +9,13 @@ export class GatewayService {
     private readonly audit: AuditService,
   ) {}
 
-  list(whitelabelId: string, correlationId?: string) {
-    return this.core.request({
+  async list(whitelabelId: string, correlationId?: string) {
+    const result = await this.core.request({
       method: 'GET',
       path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/gateways`,
       correlationId,
     });
+    return result.data;
   }
 
   async upsert(
@@ -43,6 +44,6 @@ export class GatewayService {
       ip: meta.ip,
       userAgent: meta.userAgent,
     });
-    return result;
+    return result.data;
   }
 }

@@ -9,12 +9,13 @@ export class SmtpService {
     private readonly audit: AuditService,
   ) {}
 
-  get(whitelabelId: string, correlationId?: string) {
-    return this.core.request({
+  async get(whitelabelId: string, correlationId?: string) {
+    const result = await this.core.request({
       method: 'GET',
       path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/smtp`,
       correlationId,
     });
+    return result.data;
   }
 
   async update(
@@ -41,7 +42,7 @@ export class SmtpService {
       ip: meta.ip,
       userAgent: meta.userAgent,
     });
-    return result;
+    return result.data;
   }
 
   async test(
@@ -66,6 +67,6 @@ export class SmtpService {
       ip: meta.ip,
       userAgent: meta.userAgent,
     });
-    return result;
+    return result.data;
   }
 }

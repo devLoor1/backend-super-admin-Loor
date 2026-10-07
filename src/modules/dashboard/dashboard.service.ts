@@ -5,15 +5,13 @@ import { LoorCoreClient } from '../../integrations/loor-core/loor-core.client';
 export class DashboardService {
   constructor(private readonly core: LoorCoreClient) {}
 
-  /**
-   * Prefers a single Core aggregate endpoint over fan-out of many requests.
-   */
-  overview(query: Record<string, unknown>, correlationId?: string) {
-    return this.core.request({
+  async overview(query: Record<string, unknown>, correlationId?: string) {
+    const result = await this.core.request({
       method: 'GET',
       path: '/internal/super-admin/v1/dashboard',
       query,
       correlationId,
     });
+    return result.data;
   }
 }

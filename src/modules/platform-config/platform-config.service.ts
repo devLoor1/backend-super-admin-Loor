@@ -9,12 +9,13 @@ export class PlatformConfigService {
     private readonly audit: AuditService,
   ) {}
 
-  get(whitelabelId: string, correlationId?: string) {
-    return this.core.request({
+  async get(whitelabelId: string, correlationId?: string) {
+    const result = await this.core.request({
       method: 'GET',
-      path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/platform-config`,
+      path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/settings`,
       correlationId,
     });
+    return result.data;
   }
 
   async update(
@@ -24,7 +25,7 @@ export class PlatformConfigService {
   ) {
     const result = await this.core.request({
       method: 'PUT',
-      path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/platform-config`,
+      path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/settings`,
       body,
       correlationId: meta.correlationId,
     });
@@ -39,6 +40,6 @@ export class PlatformConfigService {
       ip: meta.ip,
       userAgent: meta.userAgent,
     });
-    return result;
+    return result.data;
   }
 }

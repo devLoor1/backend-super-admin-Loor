@@ -1,31 +1,30 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { LoorCoreClient } from '../../integrations/loor-core/loor-core.client';
+import { AuditService } from '../audit/audit.service';
 import { AccountFiltersDto, AccountTipo } from './dto/account-filters.dto';
 
 type AccountKind = 'investor' | 'entrepreneur' | 'admin';
 
-/**
- * Tenant-scoped account list for FE Account Control V1.
- * Routes mirror `#/whitelabels/:whitelabelId/accounts?tipo=...`.
- * Core internal endpoints for investors/entrepreneurs are still pending;
- * admins reuse the existing whitelabel admins path when available.
- */
 @Injectable()
 export class AccountsService {
-  constructor(private readonly core: LoorCoreClient) {}
+  constructor(
+    private readonly core: LoorCoreClient,
+    private readonly audit: AuditService,
+  ) {}
 
-  list(whitelabelId: string, query: AccountFiltersDto, correlationId?: string) {
+  async list(whitelabelId: string, query: AccountFiltersDto, correlationId?: string) {
     this.assertNumericId(whitelabelId);
     const kind = this.resolveKind(query);
     const { page = 1, perPage = 20, search, sort, order, access } = query;
 
     if (kind === 'admin') {
-      return this.core.request({
+      const result = await this.core.request({
         method: 'GET',
         path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/admins`,
         query: { page, perPage, search, sort, order },
         correlationId,
       });
+      return result.data;
     }
 
     const path =
@@ -33,23 +32,16 @@ export class AccountsService {
         ? '/internal/super-admin/v1/investors'
         : '/internal/super-admin/v1/entrepreneurs';
 
-    return this.core.request({
+    const result = await this.core.request({
       method: 'GET',
       path,
-      query: {
-        page,
-        perPage,
-        search,
-        sort,
-        order,
-        access,
-        whitelabelId,
-      },
+      query: { page, perPage, search, sort, order, access, whitelabelId },
       correlationId,
     });
+    return result.data;
   }
 
-  detail(
+  async detail(
     whitelabelId: string,
     accountId: string,
     query: AccountFiltersDto,
@@ -59,11 +51,12 @@ export class AccountsService {
     const kind = this.resolveKind(query);
 
     if (kind === 'admin') {
-      return this.core.request({
+      const result = await this.core.request({
         method: 'GET',
         path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/admins/${accountId}`,
         correlationId,
       });
+      return result.data;
     }
 
     const path =
@@ -71,12 +64,70 @@ export class AccountsService {
         ? `/internal/super-admin/v1/investors/${accountId}`
         : `/internal/super-admin/v1/entrepreneurs/${accountId}`;
 
-    return this.core.request({
+    const result = await this.core.request({
       method: 'GET',
       path,
       query: { whitelabelId },
       correlationId,
     });
+    return result.data;
+  }
+
+  async pause(
+    whitelabelId: string,
+    accountId: string,
+    query: AccountFiltersDto,
+    body: { reason?: string },
+    meta: { operatorId: string; correlationId?: string; ip?: string; userAgent?: string },
+  ) {
+    this.assertNumericId(whitelabelId);
+    const kind = this.resolveKind(query);
+    const result = await this.core.request({
+      method: 'POST',
+      path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/accounts/${kind}/${accountId}/pause`,
+      body: { reason: body.reason },
+      correlationId: meta.correlationId,
+    });
+    await this.audit.write({
+      action: 'PAUSE_ACCOUNT',
+      superAdminId: meta.operatorId,
+      resourceType: kind,
+      resourceId: accountId,
+      whitelabelId: Number(whitelabelId),
+      afterData: { reason: body.reason },
+      result: 'success',
+      correlationId: meta.correlationId,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+    return result.data;
+  }
+
+  async reactivate(
+    whitelabelId: string,
+    accountId: string,
+    query: AccountFiltersDto,
+    meta: { operatorId: string; correlationId?: string; ip?: string; userAgent?: string },
+  ) {
+    this.assertNumericId(whitelabelId);
+    const kind = this.resolveKind(query);
+    const result = await this.core.request({
+      method: 'POST',
+      path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/accounts/${kind}/${accountId}/reactivate`,
+      correlationId: meta.correlationId,
+    });
+    await this.audit.write({
+      action: 'REACTIVATE_ACCOUNT',
+      superAdminId: meta.operatorId,
+      resourceType: kind,
+      resourceId: accountId,
+      whitelabelId: Number(whitelabelId),
+      result: 'success',
+      correlationId: meta.correlationId,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+    return result.data;
   }
 
   private resolveKind(query: AccountFiltersDto): AccountKind {
