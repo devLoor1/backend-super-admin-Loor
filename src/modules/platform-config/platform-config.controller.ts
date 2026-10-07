@@ -9,7 +9,8 @@ import { PlatformConfigService } from './platform-config.service';
 
 @ApiTags('Platform Configuration')
 @ApiBearerAuth()
-@Controller('whitelabels/:whitelabelId/platform-config')
+/** Path mirrors FE `#/whitelabels/:id/settings`. */
+@Controller('whitelabels/:whitelabelId/settings')
 export class PlatformConfigController {
   constructor(private readonly service: PlatformConfigService) {}
 

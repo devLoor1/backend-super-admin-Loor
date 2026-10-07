@@ -67,6 +67,7 @@ export class AuthService {
     return {
       accessToken,
       tokenType: 'Bearer',
+      expiresIn: process.env.JWT_EXPIRES_IN || '8h',
       operator: {
         id: admin.id,
         name: admin.name,

@@ -12,6 +12,7 @@ import { CorrelationIdInterceptor } from './common/interceptors/correlation-id.i
 import { ResponseTimeInterceptor } from './common/interceptors/response-time.interceptor';
 import { PrismaModule } from './database/prisma/prisma.module';
 import { LoorCoreModule } from './integrations/loor-core/loor-core.module';
+import { AccountsModule } from './modules/accounts/accounts.module';
 import { AdministratorModule } from './modules/administrator/administrator.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -74,6 +75,7 @@ import { WhitelabelModule } from './modules/whitelabel/whitelabel.module';
     AuditModule,
     DashboardModule,
     WhitelabelModule,
+    AccountsModule,
     AdministratorModule,
     PlatformConfigModule,
     SmtpModule,

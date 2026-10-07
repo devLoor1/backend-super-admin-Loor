@@ -9,7 +9,8 @@ import { GatewayService } from './gateway.service';
 
 @ApiTags('Gateways')
 @ApiBearerAuth()
-@Controller('whitelabels/:whitelabelId/gateways')
+/** Path mirrors FE `#/whitelabels/:id/finance/gateways` (config only — no financial ops). */
+@Controller('whitelabels/:whitelabelId/finance/gateways')
 export class GatewayController {
   constructor(private readonly service: GatewayService) {}
 

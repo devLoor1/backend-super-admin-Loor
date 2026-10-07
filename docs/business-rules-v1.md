@@ -7,14 +7,17 @@ FE Super Admin → NestJS Control Plane → Adonis Core /internal/super-admin/v1
 CP MySQL (Prisma): operadores, roles, audit
 ```
 
+Frontend baseline puxado: `super-admin-Loor` `dev` (Login, Dashboard, Whitelabels, Accounts, Settings, Emails, Finance/Gateways).  
+Todas as feature branches do FE foram fetchadas; a árvore canônica para integração é **`dev`**. O FE ainda é protótipo (**INTEGRATION PENDING**) — o wire-up HTTP é do Arthur.
+
 ## Fronteira (Arthur + arquitetura)
 
-| Pertence ao Nest (CP) | Pertence ao Core |
-| --- | --- |
-| Login/JWT do operador LOØR | Investor, Entrepreneur, Opportunity, Wallet, Payment… |
-| RBAC do operador | Registry Whitelabel (id/slug/name/baseUrl/isActive) |
-| Audit do Control Plane | Regras financeiras / KYC / Terms legais |
-| Orquestração + projeção segura | Persistência operacional |
+| Pertence ao Nest (CP) | Pertence ao Core | Pertence ao FE (Arthur) |
+| --- | --- | --- |
+| Login/JWT do operador LOØR | Investor, Entrepreneur, Opportunity, Wallet, Payment… | Client HTTP, token storage, rotas hash → API |
+| RBAC do operador | Registry Whitelabel (id/slug/name/baseUrl/isActive) | Substituição dos stores in-memory |
+| Audit do Control Plane | Regras financeiras / KYC / Terms legais | UX de erro/loading/empty |
+| Orquestração + projeção segura | Persistência operacional | |
 
 `Admin.isSuperAdmin` no Core **não** é operador do Control Plane.
 
@@ -28,14 +31,15 @@ CP MySQL (Prisma): operadores, roles, audit
 - `GET /internal/super-admin/v1/whitelabels/:id`
 - Status Core: apenas `active` | `inactive` (boolean `is_active`) — sem setup/draft inventado (Q-WL-02)
 
-### Nest
+### Nest (alinhado ao FE)
 
-- `WhitelabelService` com:
-  - rejeição de ids `wl_proto_*`
-  - paginação limitada (max 100)
-  - mapeamento seguro Core → contrato CP
-  - audit success/failure em create/update/status
-  - unwrap do envelope do `LoorCoreClient` para o FE
+- Auth: `POST /api/auth/login`, `GET /api/auth/me` (+ `expiresIn`)
+- Whitelabel projeção FE: `idKey`, `domain`, `admins`, `applications`/`integrations` null, `status` active|inactive
+- Accounts: `GET /api/whitelabels/:id/accounts?tipo=investidores|empreendedores|administradores`
+- Settings path: `/api/whitelabels/:id/settings`
+- Emails SMTP: `/api/whitelabels/:id/emails/smtp` (+ alias `/smtp`)
+- Finance gateways: `/api/whitelabels/:id/finance/gateways`
+- Contrato: [`fe-integration-contract-v1.md`](./fe-integration-contract-v1.md)
 
 ## Ainda bloqueado / próximo
 
@@ -45,7 +49,9 @@ CP MySQL (Prisma): operadores, roles, audit
 | Pause/reactivate contas | Q-PA + domínio novo no Core |
 | Reassign tenant | Q-TR |
 | Dashboard aggregates | Q-WL-04 |
-| Investors/Entrepreneurs internal reads | próxima fatia de leitura |
+| Investors/Entrepreneurs internal reads | próxima fatia de leitura Core |
+| Settings / SMTP / Gateways Core exposure | handoff + Q-ST / Q-SM / Q-GW |
+| FE client + auth guard | Arthur |
 
 ## Env alinhada
 
@@ -54,9 +60,13 @@ CP MySQL (Prisma): operadores, roles, audit
 LOOR_CORE_SERVICE_SECRET=...
 LOOR_CORE_SERVICE_ISSUER=loor-super-admin
 LOOR_CORE_SERVICE_AUDIENCE=loor-core
+CORS_ORIGIN=http://localhost:5173
 
 # Core
 SUPER_ADMIN_SERVICE_JWT_SECRET=...   # mesmo secret
 SUPER_ADMIN_SERVICE_JWT_ISSUER=loor-super-admin
 SUPER_ADMIN_SERVICE_JWT_AUDIENCE=loor-core
+
+# FE (Arthur)
+VITE_API_BASE_URL=http://localhost:3334/api
 ```

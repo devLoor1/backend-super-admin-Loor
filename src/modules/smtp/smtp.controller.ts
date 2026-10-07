@@ -9,7 +9,14 @@ import { SmtpService } from './smtp.service';
 
 @ApiTags('SMTP')
 @ApiBearerAuth()
-@Controller('whitelabels/:whitelabelId/smtp')
+/**
+ * Emails SMTP under FE route `#/whitelabels/:id/emails?section=smtp`.
+ * Legacy alias `/smtp` kept for early scaffold clients.
+ */
+@Controller([
+  'whitelabels/:whitelabelId/emails/smtp',
+  'whitelabels/:whitelabelId/smtp',
+])
 export class SmtpController {
   constructor(private readonly service: SmtpService) {}
 

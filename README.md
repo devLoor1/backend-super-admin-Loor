@@ -53,6 +53,7 @@ npm run start:dev
 - API: `http://localhost:3334/api`
 - Swagger: `http://localhost:3334/api/docs`
 - Health: `http://localhost:3334/api/health`
+- Contrato FE↔Nest: [`docs/fe-integration-contract-v1.md`](docs/fe-integration-contract-v1.md)
 
 ```bash
 npm test

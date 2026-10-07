@@ -43,6 +43,7 @@ async function bootstrap() {
     .addTag('Auth')
     .addTag('Dashboard')
     .addTag('Whitelabels')
+    .addTag('Accounts')
     .addTag('Administrators')
     .addTag('Platform Configuration')
     .addTag('SMTP')
