@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum SuperAdminStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum RoleSlug {
+  SUPER_ADMIN
+  FINANCIAL_ADMIN
+  COMPLIANCE_ADMIN
+  SUPPORT_ADMIN
+  READ_ONLY
+}
+
+model SuperAdmin {
+  id           String           @id @default(cuid())
+  name         String
+  email        String           @unique
+  passwordHash String           @map("password_hash")
+  status       SuperAdminStatus @default(ACTIVE)
+  lastLoginAt  DateTime?        @map("last_login_at")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  roles     SuperAdminRole[]
+  auditLogs AuditLog[]
+
+  @@map("super_admins")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String
+  slug        RoleSlug @unique
+  description String?  @db.VarChar(500)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  permissions PermissionRole[]
+  superAdmins SuperAdminRole[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?  @db.VarChar(500)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  roles PermissionRole[]
+
+  @@map("permissions")
+}
+
+model SuperAdminRole {
+  id           String @id @default(cuid())
+  superAdminId String @map("super_admin_id")
+  roleId       String @map("role_id")
+
+  superAdmin SuperAdmin @relation(fields: [superAdminId], references: [id], onDelete: Cascade)
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([superAdminId, roleId])
+  @@map("super_admin_roles")
+}
+
+model PermissionRole {
+  id           String @id @default(cuid())
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("permission_roles")
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  superAdminId  String?  @map("super_admin_id")
+  action        String
+  resourceType  String?  @map("resource_type")
+  resourceId    String?  @map("resource_id")
+  whitelabelId  Int?     @map("whitelabel_id")
+  beforeData    Json?    @map("before_data")
+  afterData     Json?    @map("after_data")
+  result        String?
+  ip            String?  @db.VarChar(64)
+  userAgent     String?  @map("user_agent") @db.VarChar(512)
+  correlationId String?  @map("correlation_id") @db.VarChar(64)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  superAdmin SuperAdmin? @relation(fields: [superAdminId], references: [id], onDelete: SetNull)
+
+  @@index([action])
+  @@index([resourceType])
+  @@index([whitelabelId])
+  @@index([correlationId])
+  @@map("audit_logs")
+}
