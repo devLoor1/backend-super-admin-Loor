@@ -34,6 +34,8 @@ import { WhitelabelModule } from './modules/whitelabel/whitelabel.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: ['.env'],
+      expandVariables: true,
       load: [configuration],
       validate: validateEnv,
     }),

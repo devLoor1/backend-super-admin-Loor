@@ -50,12 +50,21 @@ class EnvironmentVariables {
 }
 
 export function validateEnv(config: Record<string, unknown>) {
-  const validated = plainToInstance(EnvironmentVariables, config, {
+  // Nest merges .env + process.env; keep an explicit merge so watch restarts
+  // still see values even if the host env was empty at process spawn.
+  const merged = {
+    ...process.env,
+    ...config,
+  } as Record<string, unknown>;
+
+  const validated = plainToInstance(EnvironmentVariables, merged, {
     enableImplicitConversion: true,
   });
   const errors = validateSync(validated, { skipMissingProperties: false });
   if (errors.length > 0) {
-    throw new Error(errors.toString());
+    throw new Error(
+      `${errors.toString()}\nHint: ensure backend-super-admin-Loor/.env exists (copy from .env.example) and restart npm run start:dev from that folder.`,
+    );
   }
   return validated;
 }
