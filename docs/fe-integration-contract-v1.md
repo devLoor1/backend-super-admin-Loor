@@ -1,30 +1,39 @@
 # FE ↔ Control Plane integration contract V1
 
-Audience: **Arthur (FE)** wires the Super Admin UI to Nest. Lucas (BE) owns Nest + Core internal APIs.
+Audience: FE wires Super Admin UI to Nest. BE owns Nest + Core internal APIs.
 
-Frontend baseline: `super-admin-Loor` branch `dev@25b5e65` (all feature prototypes merged).  
-Control Plane: Nest `backend-super-admin-Loor` global prefix `/api`, Swagger `/api/docs`.  
-Default local: FE `http://localhost:5173` → Nest `http://localhost:3334` (`CORS_ORIGIN` already allows Vite).
+| Repo | Branch | Role |
+| --- | --- | --- |
+| `super-admin-Loor` | `dev` | Frontend |
+| `backend-super-admin-Loor` | `dev` | Nest Control Plane |
+| Core Adonis (`backend`) | `dev` | Data Plane `/internal/super-admin/v1` |
+
+Default local: FE `http://localhost:5173` → Nest `http://localhost:3334` (`CORS_ORIGIN` allows Vite) → Core `http://127.0.0.1:3333` (quando necessário).
+
+Homolog **não** sobe automaticamente a partir de `dev` — deploy via branch `homolog`.
 
 ## Status
 
 | Layer | Status |
 | --- | --- |
-| FE prototypes | Done — still **in-memory**, no API client |
-| Nest auth + Whitelabel reads | Ready for first wire-up |
-| Nest Accounts / Settings / Emails / Finance routes | Scaffold aligned to FE paths; Core backing partial/missing |
-| FE → Nest wiring | **Arthur** |
-| Nest → Core for investors/settings/smtp/gateways | **Lucas** as Core endpoints land |
+| FE Login → Nest auth | **Done** — `loginWithCredentials`, session, route guard, header logout |
+| Nest auth + operator JWT | **Done** — seed `superadmin@loor.local` |
+| Nest Whitelabel / Accounts / Settings / SMTP / Gateways / Dashboard routes | Scaffold + proxies ready |
+| Core `/internal/super-admin/v1/*` | **Done** on Core `dev` (reads/writes + account pause table) |
+| FE Whitelabels list/detail | **Pending** — still prototype rows (`wl_proto_*`) |
+| FE Contas / Settings / E-mails / Finance / Dashboard KPIs | **Pending** — local mock state |
+| Account pause enforcement on Core actor login | **Pending** — row persisted; middleware not yet |
 
-## Auth (first integration slice)
+## Auth (integrated)
 
-| FE screen | Nest |
+| FE | Nest |
 | --- | --- |
 | Login form `email` + `password` | `POST /api/auth/login` |
 | After login → `#/dashboard` | Store `accessToken`; send `Authorization: Bearer <token>` |
 | Operator chip / session | `GET /api/auth/me` |
+| Header logout | Clear session → `#/` (login) |
 
-Login body:
+Login body (dev seed):
 
 ```json
 { "email": "superadmin@loor.local", "password": "ChangeMeDevOnly!123" }
@@ -43,7 +52,15 @@ Login response:
 
 Errors: `401` with `code: UNAUTHORIZED`. Do **not** call Core actor login (`/auth/admin` etc.).
 
-## Whitelabels (second slice)
+FE env:
+
+```bash
+VITE_API_BASE_URL=http://localhost:3334/api
+```
+
+Client expectations: Bearer token, optional `X-Correlation-ID`, typed error `{ statusCode, code, message, correlationId }`.
+
+## Whitelabels (next FE wire-up)
 
 | FE | Nest |
 | --- | --- |
@@ -73,6 +90,8 @@ List envelope:
 }
 ```
 
+Requires Core up + matching service JWT secrets (see Nest README).
+
 ## Accounts (FE Account Control)
 
 FE: `#/whitelabels/:whitelabelId/accounts?tipo=investidores|empreendedores|administradores`
@@ -82,11 +101,11 @@ FE: `#/whitelabels/:whitelabelId/accounts?tipo=investidores|empreendedores|admin
 | `GET /api/whitelabels/:whitelabelId/accounts` | `tipo` (FE) or `type=investor\|entrepreneur\|admin` |
 | `GET /api/whitelabels/:whitelabelId/accounts/:accountId` | same `tipo` / `type` |
 
-Requires Core internal investor/entrepreneur/admin reads. Until then Nest will surface Core/proxy errors — FE should show empty/error states, not mock as success.
+Pause/reactivate go through Nest → Core account-access endpoints. Until FE is wired, Nest/Core may already respond; FE should show empty/error states, not treat mock as success.
 
-## Settings / Emails / Finance (path alignment only)
+## Settings / Emails / Finance (path alignment)
 
-| FE hash | Nest (config only) |
+| FE hash | Nest |
 | --- | --- |
 | `#/whitelabels/:id/settings` | `GET/PUT /api/whitelabels/:id/settings` |
 | `#/whitelabels/:id/emails?section=smtp` | `GET/PUT /api/whitelabels/:id/emails/smtp` (+ `POST .../test`) |
@@ -96,19 +115,29 @@ Secrets are write-only: never expect password/API key readback. Finance routes a
 
 ## Dashboard
 
-`GET /api/dashboard` — needs Core aggregate (`Q-WL-04`). Until then keep empty KPI states.
+`GET /api/dashboard` — Core aggregate. Until FE wires it, keep empty KPI states ("—", "Sem dados").
 
-## What Arthur should do
+## How to run the stack (tech lead / local)
 
-1. Add `VITE_API_BASE_URL=http://localhost:3334/api`.
-2. API client: Bearer token, `X-Correlation-ID`, typed error `{ statusCode, code, message, correlationId }`.
-3. Wire Login → token → navigate `#/dashboard` (replace prototype notice).
-4. Wire Whitelabels list/detail; map Nest fields above; guard against `wl_proto_*`.
-5. Leave pause/reassign/create WL writes until Product Qs + Core endpoints are ready.
+1. **Nest** (`backend-super-admin-Loor` / `dev`):
+   `npm i` → `cp .env.example .env` → `docker compose up -d` → `npx prisma migrate dev` → `npm run prisma:seed` → `npm run start:dev`
+2. **FE** (`super-admin-Loor` / `dev`):
+   `npm i` → `cp .env.example .env` → `npm run dev` → login com seed
+3. **Core** (opcional): Adonis `:3333` + `SUPER_ADMIN_SERVICE_JWT_*` = `LOOR_CORE_SERVICE_*` do Nest
+
+Detalhes: README do Nest.
+
+## Next FE work
+
+1. Wire Whitelabels list/detail; map Nest fields; guard against `wl_proto_*`.
+2. Wire Contas (list + pause/reactivate) against Nest accounts routes.
+3. Wire Settings / SMTP / Gateways; keep secrets write-only.
+4. Wire Dashboard KPIs when Core aggregate is acceptable for UI.
+5. Leave create-WL / reassign writes until Product Qs are closed.
 6. Do not invent setup/draft status from the API.
 
-## What stays on Backend
+## Backend ownership
 
-- Core `/internal/super-admin/v1/*` for investors, entrepreneurs, settings, SMTP, gateways, dashboard.
-- Nest mappers/audit/RBAC.
-- Homolog/dev env secrets (`JWT_*`, `LOOR_CORE_SERVICE_*`).
+- Core `/internal/super-admin/v1/*` for investors, entrepreneurs, settings, SMTP, gateways, dashboard, account access.
+- Nest mappers / audit / RBAC / `LoorCoreClient`.
+- Homolog/dev env secrets (`JWT_*`, `LOOR_CORE_SERVICE_*` / `SUPER_ADMIN_SERVICE_JWT_*`).
