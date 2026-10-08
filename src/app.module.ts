@@ -30,6 +30,17 @@ import { SmtpModule } from './modules/smtp/smtp.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { WhitelabelModule } from './modules/whitelabel/whitelabel.module';
 
+// pino-pretty is a devDependency: only use it when installed, so a production
+// install without devDependencies never crashes on logger bootstrap.
+function hasPinoPretty(): boolean {
+  try {
+    require.resolve('pino-pretty');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -45,7 +56,7 @@ import { WhitelabelModule } from './modules/whitelabel/whitelabel.module';
         pinoHttp: {
           level: config.get<string>('logLevel') || 'info',
           transport:
-            config.get<string>('nodeEnv') === 'development'
+            config.get<string>('nodeEnv') === 'development' && hasPinoPretty()
               ? { target: 'pino-pretty', options: { singleLine: true } }
               : undefined,
           redact: [

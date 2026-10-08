@@ -62,8 +62,21 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swagger);
   SwaggerModule.setup('api/docs', app, document);
 
-  const port = config.get<number>('port') || 3334;
-  await app.listen(port);
+  // Liveness probe for the hosting platform: outside the `api` prefix, no auth,
+  // no DB/Core calls. Readiness with dependency checks stays at /api/health.
+  app
+    .getHttpAdapter()
+    .get('/health', (_req: unknown, res: { json: (body: unknown) => void }) => {
+      res.json({
+        status: 'ok',
+        service: 'loor-super-admin-api',
+        timestamp: new Date().toISOString(),
+      });
+    });
+
+  // PORT is injected by the hosting platform; configuration.ts falls back to 3334 locally.
+  const port = Number(process.env.PORT) || config.get<number>('port') || 3334;
+  await app.listen(port, '0.0.0.0');
   logger.log(`Control Plane listening on :${port} — docs /api/docs`);
 }
 
