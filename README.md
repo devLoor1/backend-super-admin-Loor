@@ -117,7 +117,9 @@ Rotas internas no Core: `/internal/super-admin/v1/*` (service JWT).
 | Auth operador (`POST /api/auth/login`, `GET /api/auth/me`) | Pronto — FE wired |
 | Nest → Core (`LoorCoreClient` + service JWT) | Pronto |
 | Core `/internal/super-admin/v1` (WL, accounts, settings, SMTP, gateways, dashboard, pause) | Implementado no Core (`dev`) |
-| FE Whitelabels / Contas / Settings / E-mails / Finance / Dashboard KPIs | Ainda protótipo local (mock) — próximo wire-up |
+| Core Opportunities read (`GET …/opportunities`, `GET …/opportunities/:id`) | Pronto — read-only; ver [`docs/opportunities-read-contract-v1.md`](docs/opportunities-read-contract-v1.md) |
+| Nest `OpportunityService.list/detail` unwrap (`result.data`) | Pronto (mesmo padrão Investor/Entrepreneur) |
+| FE Whitelabels / Contas / Settings / E-mails / Finance / Dashboard KPIs / Opportunities | Ainda protótipo local (mock) — próximo wire-up |
 | Pause de conta no Core login middleware | Persistido em `SuperAdminAccountAccess`; enforcement no login do ator ainda pendente |
 
 ## Arquitetura

@@ -12,12 +12,24 @@ export class OpportunityService {
     private readonly audit: AuditService,
   ) {}
 
-  list(query: PaginationQueryDto | Record<string, unknown>, correlationId?: string) {
-    return this.core.request({ method: 'GET', path: this.base, query, correlationId });
+  async list(query: PaginationQueryDto | Record<string, unknown>, correlationId?: string) {
+    const result = await this.core.request({
+      method: 'GET',
+      path: this.base,
+      query,
+      correlationId,
+    });
+    // Unwrap LoorCoreClient envelope — public /api/opportunities must match Core body.
+    return result.data;
   }
 
-  detail(id: string, correlationId?: string) {
-    return this.core.request({ method: 'GET', path: `${this.base}/${id}`, correlationId });
+  async detail(id: string, correlationId?: string) {
+    const result = await this.core.request({
+      method: 'GET',
+      path: `${this.base}/${id}`,
+      correlationId,
+    });
+    return result.data;
   }
 
   async approve(
