@@ -21,8 +21,9 @@ Homolog **não** sobe automaticamente a partir de `dev` — deploy via branch `h
 | Nest Whitelabel / Accounts / Settings / SMTP / Gateways / Dashboard routes | Scaffold + proxies ready |
 | Core `/internal/super-admin/v1/*` | **Done** on Core `dev` (reads/writes + account pause table) |
 | Core Opportunities read + Nest unwrap | **Done** — see [`opportunities-read-contract-v1.md`](opportunities-read-contract-v1.md) |
-| FE Whitelabels list/detail | **Pending** — still prototype rows (`wl_proto_*`) |
-| FE Contas / Settings / E-mails / Finance / Dashboard KPIs / Opportunities | **Pending** — local mock state |
+| Whitelabel CRUD + Companies + Finance RO + Menu visibility | **Done** — see [`arthur-demands-backend-v1.md`](arthur-demands-backend-v1.md) |
+| FE Whitelabels list/detail | **Integrated** (list/detail); mutations ready for FE wire |
+| FE Contas / Settings / E-mails / Finance / Dashboard KPIs / Opportunities / Companies | **Pending FE wire** where still mock |
 | Account pause enforcement on Core actor login | **Pending** — row persisted; middleware not yet |
 
 ## Auth (integrated)

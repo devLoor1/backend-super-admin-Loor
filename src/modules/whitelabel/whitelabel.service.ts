@@ -112,11 +112,13 @@ export class WhitelabelService {
         correlationId: meta.correlationId,
       });
 
+      const mapped = result.data?.data ? mapWhitelabel(result.data.data) : null;
       await this.audit.write({
         action: 'CREATE_WHITELABEL',
         superAdminId: meta.operatorId,
         resourceType: 'whitelabel',
-        resourceId: result.data?.data?.id,
+        resourceId: mapped?.id != null ? String(mapped.id) : undefined,
+        whitelabelId: mapped?.id != null ? Number(mapped.id) : undefined,
         afterData: { name: dto.name, slug: dto.slug, baseUrl: dto.baseUrl },
         result: 'success',
         correlationId: meta.correlationId,
@@ -124,7 +126,7 @@ export class WhitelabelService {
         userAgent: meta.userAgent,
       });
 
-      return result.data?.data ? mapWhitelabel(result.data.data) : result.data;
+      return { data: mapped ?? result.data };
     } catch (error) {
       await this.audit.write({
         action: 'CREATE_WHITELABEL',
@@ -147,6 +149,13 @@ export class WhitelabelService {
   ) {
     this.assertNumericId(id);
 
+    let beforeData: ControlPlaneWhitelabel | null = null;
+    try {
+      beforeData = await this.detail(id, meta.correlationId);
+    } catch {
+      beforeData = null;
+    }
+
     try {
       const result = await this.core.request<DetailCore>({
         method: 'PATCH',
@@ -155,11 +164,14 @@ export class WhitelabelService {
         correlationId: meta.correlationId,
       });
 
+      const mapped = result.data?.data ? mapWhitelabel(result.data.data) : null;
       await this.audit.write({
         action: 'UPDATE_WHITELABEL',
         superAdminId: meta.operatorId,
         resourceType: 'whitelabel',
         resourceId: id,
+        whitelabelId: Number(id),
+        beforeData: beforeData ?? undefined,
         afterData: { ...dto },
         result: 'success',
         correlationId: meta.correlationId,
@@ -167,13 +179,15 @@ export class WhitelabelService {
         userAgent: meta.userAgent,
       });
 
-      return result.data?.data ? mapWhitelabel(result.data.data) : result.data;
+      return { data: mapped ?? result.data };
     } catch (error) {
       await this.audit.write({
         action: 'UPDATE_WHITELABEL',
         superAdminId: meta.operatorId,
         resourceType: 'whitelabel',
         resourceId: id,
+        whitelabelId: Number(id),
+        beforeData: beforeData ?? undefined,
         afterData: { ...dto },
         result: 'failed',
         correlationId: meta.correlationId,
@@ -191,6 +205,13 @@ export class WhitelabelService {
   ) {
     this.assertNumericId(id);
 
+    let beforeData: ControlPlaneWhitelabel | null = null;
+    try {
+      beforeData = await this.detail(id, meta.correlationId);
+    } catch {
+      beforeData = null;
+    }
+
     try {
       const result = await this.core.request<DetailCore>({
         method: 'PATCH',
@@ -199,25 +220,29 @@ export class WhitelabelService {
         correlationId: meta.correlationId,
       });
 
+      const mapped = result.data?.data ? mapWhitelabel(result.data.data) : null;
       await this.audit.write({
         action: active ? 'ENABLE_WHITELABEL' : 'DISABLE_WHITELABEL',
         superAdminId: meta.operatorId,
         resourceType: 'whitelabel',
         resourceId: id,
-        afterData: { active },
+        whitelabelId: Number(id),
+        beforeData: beforeData ?? undefined,
+        afterData: { active, semantics: 'logical_deactivate_no_cascade' },
         result: 'success',
         correlationId: meta.correlationId,
         ip: meta.ip,
         userAgent: meta.userAgent,
       });
 
-      return result.data?.data ? mapWhitelabel(result.data.data) : result.data;
+      return { data: mapped ?? result.data };
     } catch (error) {
       await this.audit.write({
         action: active ? 'ENABLE_WHITELABEL' : 'DISABLE_WHITELABEL',
         superAdminId: meta.operatorId,
         resourceType: 'whitelabel',
         resourceId: id,
+        whitelabelId: Number(id),
         afterData: { active },
         result: 'failed',
         correlationId: meta.correlationId,

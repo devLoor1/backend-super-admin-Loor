@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
+import { IsOptional, IsString, IsUrl, Matches, MaxLength, MinLength } from 'class-validator';
 
 export class UpdateWhitelabelDto {
   @ApiPropertyOptional()
@@ -8,6 +8,13 @@ export class UpdateWhitelabelDto {
   @MinLength(2)
   @MaxLength(120)
   name?: string;
+
+  @ApiPropertyOptional({ example: 'finapop' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z0-9-]+$/)
+  @MaxLength(80)
+  slug?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

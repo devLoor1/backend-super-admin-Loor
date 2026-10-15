@@ -1,5 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUrl, Matches, MaxLength, MinLength } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsUrl, Matches, MaxLength, MinLength } from 'class-validator';
 
 export class CreateWhitelabelDto {
   @ApiProperty()
@@ -14,8 +14,7 @@ export class CreateWhitelabelDto {
   @MaxLength(80)
   slug!: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty({ example: 'https://finapop.loor.vc' })
   @IsUrl({ require_tld: false })
-  baseUrl?: string;
+  baseUrl!: string;
 }

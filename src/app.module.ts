@@ -16,6 +16,7 @@ import { AccountsModule } from './modules/accounts/accounts.module';
 import { AdministratorModule } from './modules/administrator/administrator.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CompanyModule } from './modules/company/company.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { EntrepreneurModule } from './modules/entrepreneur/entrepreneur.module';
@@ -23,6 +24,7 @@ import { GatewayModule } from './modules/gateway/gateway.module';
 import { HealthModule } from './modules/health/health.module';
 import { InvestmentModule } from './modules/investment/investment.module';
 import { InvestorModule } from './modules/investor/investor.module';
+import { MenuVisibilityModule } from './modules/menu-visibility/menu-visibility.module';
 import { OpportunityModule } from './modules/opportunity/opportunity.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { PlatformConfigModule } from './modules/platform-config/platform-config.module';
@@ -89,6 +91,7 @@ function hasPinoPretty(): boolean {
     DashboardModule,
     WhitelabelModule,
     AccountsModule,
+    CompanyModule,
     AdministratorModule,
     PlatformConfigModule,
     SmtpModule,
@@ -100,6 +103,7 @@ function hasPinoPretty(): boolean {
     WalletModule,
     GatewayModule,
     ComplianceModule,
+    MenuVisibilityModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

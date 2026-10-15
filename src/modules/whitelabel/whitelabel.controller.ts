@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -87,6 +88,25 @@ export class WhitelabelController {
   @Patch(':id/deactivate')
   @Roles(ROLES.SUPER_ADMIN)
   deactivate(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedOperator,
+    @Req() req: Request & { correlationId?: string },
+  ) {
+    return this.service.setStatus(id, false, {
+      operatorId: user.id,
+      correlationId: req.correlationId,
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
+  @Delete(':id')
+  @Roles(ROLES.SUPER_ADMIN)
+  @ApiOperation({
+    summary:
+      'Logical deactivate (no physical delete / no cascade). Alias of PATCH …/deactivate.',
+  })
+  remove(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedOperator,
     @Req() req: Request & { correlationId?: string },
