@@ -61,6 +61,8 @@ Core: `/internal/super-admin/v1/companies`, `…/companies/:id`, `…/entreprene
 
 `page`, `perPage` (max 100), `search` (legalName / tradeName / cnpj), `whitelabelId`, `status`, `sort` (`createdAt`\|`updatedAt`\|`cnpj`\|`legalName`), `order`.
 
+Nest **aceita e encaminha** `whitelabelId` / `status`; Core **aplica** o filtro. `meta` reflete o conjunto filtrado. Status fora do vocabulário → **400**.
+
 ### Status vocabulary
 
 `pending` | `validated` | `invalid` | `not_found` | `unavailable`
@@ -68,6 +70,27 @@ Core: `/internal/super-admin/v1/companies`, `…/companies/:id`, `…/entreprene
 ### Campos
 
 `id`, `entrepreneurId`, `whitelabelId`, `legalName`, `tradeName`, `cnpj`, `status`, `createdAt`, `updatedAt` (+ detail: `phone`, `email`, `validationSource`, `validatedAt`).
+
+### Envelope extra
+
+List/detail/`byEntrepreneur` incluem `cardinality` (documentado):
+
+```json
+{
+  "entrepreneurToCompany": "0..1",
+  "companyToEntrepreneur": "1",
+  "note": "entrepreneur_company_informations.entrepreneur_id is UNIQUE. Absence of a row means no company — never invent one."
+}
+```
+
+### GET `/api/entrepreneurs/:entrepreneurId/company`
+
+| Case | HTTP | Body / code |
+| --- | --- | --- |
+| `entrepreneurId` inválido | 400 | `E_VALIDATION` |
+| Empreendedor inexistente | 404 | `E_ENTREPRENEUR_NOT_FOUND` |
+| Empreendedor existe **sem** empresa | **200** | `{ "data": null, "cardinality": {…} }` |
+| Empreendedor com empresa | 200 | `{ "data": {…}, "cardinality": {…} }` |
 
 Sem CRUD de Company nesta entrega.
 

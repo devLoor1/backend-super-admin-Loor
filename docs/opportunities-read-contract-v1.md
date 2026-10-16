@@ -18,9 +18,11 @@ Nest `OpportunityService.list/detail` returns **Core body** (`result.data`), sam
 | `search` | yes | `name` OR `business_name` (LIKE) |
 | `sort` | yes | `createdAt` (default), `updatedAt`, `name`, `status`, `dueAt` |
 | `order` | yes | `asc` \| `desc` (default `desc`) |
-| `whitelabelId` | yes | optional filter |
-| `status` | yes | optional; must be official vocabulary (ignored if unknown) |
-| `modality` | yes | optional; `equity` \| `debt` only |
+| `whitelabelId` | yes | optional filter — Nest accepts and Core applies |
+| `status` | yes | Nest validates enum; Core applies. Invalid enum → **400** |
+| `modality` | yes | Nest validates `equity`\|`debt`; Core applies. Invalid → **400** |
+
+Filters are **applied** (not accepted-and-ignored). `meta.total` / `lastPage` reflect the filtered set.
 
 ## Official status vocabulary
 
@@ -108,10 +110,15 @@ Empty list: `data: []` with `meta.total: 0`, `meta.lastPage: 1`.
 }
 ```
 
-404:
+Errors (detail):
+
+| Case | HTTP | code |
+| --- | --- | --- |
+| id inválido (não inteiro positivo) | 400 | `E_VALIDATION` |
+| oportunidade inexistente | 404 | `E_OPPORTUNITY_NOT_FOUND` |
 
 ```json
-{ "code": "E_OPPORTUNITY_NOT_FOUND", "message": "Opportunity not found" }
+{ "statusCode": 404, "code": "E_OPPORTUNITY_NOT_FOUND", "message": "Opportunity not found" }
 ```
 
 ## Nullability

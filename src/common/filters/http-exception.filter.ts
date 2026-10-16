@@ -35,10 +35,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
         typeof body === 'string'
           ? body
           : ((body as { message?: string | string[] }).message ?? exception.message);
+      const explicitCode =
+        typeof body === 'object' && body && typeof (body as { code?: unknown }).code === 'string'
+          ? (body as { code: string }).code
+          : null;
 
       return response.status(status).json({
         statusCode: status,
-        code: status === 401 ? 'UNAUTHORIZED' : status === 403 ? 'FORBIDDEN' : 'HTTP_ERROR',
+        code:
+          explicitCode ||
+          (status === 401 ? 'UNAUTHORIZED' : status === 403 ? 'FORBIDDEN' : 'HTTP_ERROR'),
         message,
         correlationId,
         details: typeof body === 'object' ? body : undefined,

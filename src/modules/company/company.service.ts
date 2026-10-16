@@ -27,10 +27,15 @@ export class CompanyService {
     return result.data;
   }
 
-  async byEntrepreneur(entrepreneurId: string, correlationId?: string) {
+  async byEntrepreneur(
+    entrepreneurId: string,
+    query?: { whitelabelId?: number },
+    correlationId?: string,
+  ) {
     const result = await this.core.request({
       method: 'GET',
       path: `/internal/super-admin/v1/entrepreneurs/${entrepreneurId}/company`,
+      query,
       correlationId,
     });
     return result.data;

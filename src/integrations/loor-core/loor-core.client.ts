@@ -63,9 +63,12 @@ export class LoorCoreClient {
       throw new LoorCoreException({
         message: this.extractSafeMessage(response.data) || `Core request failed (${response.status})`,
         status: this.mapStatus(response.status),
-        code: 'CORE_HTTP_ERROR',
+        code: this.extractSafeCode(response.data) || 'CORE_HTTP_ERROR',
         correlationId,
-        details: { coreStatus: response.status },
+        details: {
+          coreStatus: response.status,
+          coreBody: this.extractSafeBody(response.data),
+        },
       });
     } catch (error) {
       if (error instanceof LoorCoreException) {
@@ -102,5 +105,21 @@ export class LoorCoreClient {
     if (typeof record.message === 'string') return record.message;
     if (typeof record.error === 'string') return record.error;
     return null;
+  }
+
+  private extractSafeCode(data: unknown): string | null {
+    if (!data || typeof data !== 'object') return null;
+    const record = data as Record<string, unknown>;
+    return typeof record.code === 'string' && record.code.trim() ? record.code : null;
+  }
+
+  private extractSafeBody(data: unknown): Record<string, unknown> | undefined {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
+    const record = data as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of ['code', 'message', 'error']) {
+      if (typeof record[key] === 'string') out[key] = record[key];
+    }
+    return Object.keys(out).length ? out : undefined;
   }
 }
