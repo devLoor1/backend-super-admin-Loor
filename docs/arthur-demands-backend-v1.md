@@ -104,47 +104,12 @@ Já entregue — ver `opportunities-read-contract-v1.md`.
 
 ## Demanda 4 — Financeiro READ-ONLY
 
-**Investment ≠ Payment ≠ Wallet Balance ≠ Wallet Movement.**
+Contrato completo e atualizado: [`finance-read-contract-v1.md`](finance-read-contract-v1.md).
 
-Money: **integer centavos** + `currency: "BRL"`. Documentado em cada response (`money.unit`).
-
-### Investments
-
-| Method | Path |
-| --- | --- |
-| GET | `/api/investments` |
-| GET | `/api/investments/:id` |
-
-Status: `expired` \| `waiting_payment` \| `paid` \| `refunded` \| `processing` \| `failed` \| `processing_refund`
-
-Query: `page`, `perPage`, `search`, `whitelabelId`, `investorId`, `opportunityId`, `status`, `sort`, `order`
-
-Campos: `id`, `whitelabelId`, `investorId`, `opportunityId`, `amountCents`, `currency`, `status`, timestamps.
-
-### Payments (Pix charge = QrCode)
-
-| Method | Path |
-| --- | --- |
-| GET | `/api/payments` |
-| GET | `/api/payments/:id` |
-
-Status: `paid` \| `waiting_payment` \| `expired` \| `refunded`
-
-Campos: `id`, `whitelabelId`, `investmentId`, `investorId`, `opportunityId`, `amountCents`, `paymentMethod: "pix"`, `type: "investment_pix"`, `provider`, `status`, `txid`, timestamps.
-
-### Wallets (Whitelabel ledger position)
-
-| Method | Path |
-| --- | --- |
-| GET | `/api/wallets` | lista 1 wallet por Whitelabel |
-| GET | `/api/wallets/:id` | `:id` = whitelabelId |
-| GET | `/api/wallets/:id/movements` | ledger movements |
-
-`ownerType: "whitelabel"`, `ownerId`, `authoritativeBalanceCents`, `balanceTimestamp`.
-
-Sem mutations financeiras.
-
-Nest `InvestmentService` / `PaymentService` / `WalletService` retornam `result.data` (unwrap).
+**Investment ≠ Payment ≠ Wallet Balance ≠ Wallet Movement.**  
+Money: **centavos** + `BRL`. Filtros oficiais **aplicados** (não ignorados).  
+Movements: CPF **mascarado**; `search`/`sort`/`order` → **400**.  
+`GET /api/wallets/:id/investments` = alias de Investments com `whitelabelId=:id`.
 
 ---
 

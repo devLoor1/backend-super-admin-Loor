@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { LoorCoreClient } from '../../integrations/loor-core/loor-core.client';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 /**
  * Wallet is Core-owned. No balance mutation endpoints exist here by design.
@@ -11,11 +10,11 @@ export class WalletService {
 
   constructor(private readonly core: LoorCoreClient) {}
 
-  async list(query: PaginationQueryDto | Record<string, unknown>, correlationId?: string) {
+  async list(query: object, correlationId?: string) {
     const result = await this.core.request({
       method: 'GET',
       path: this.base,
-      query,
+      query: query as Record<string, unknown>,
       correlationId,
     });
     return result.data;
@@ -30,22 +29,24 @@ export class WalletService {
     return result.data;
   }
 
-  async movements(id: string, query: PaginationQueryDto, correlationId?: string) {
+  async movements(id: string, query: object, correlationId?: string) {
     const result = await this.core.request({
       method: 'GET',
       path: `${this.base}/${id}/movements`,
-      query: { ...query },
+      query: query as Record<string, unknown>,
       correlationId,
     });
     return result.data;
   }
 
-  async investments(id: string, query: PaginationQueryDto, correlationId?: string) {
-    // Prefer Investments domain; kept for path compatibility — proxies wallet-scoped movements filter if Core adds it later.
+  /**
+   * Compatibility alias: same payload as GET /api/investments?whitelabelId=:id
+   */
+  async investments(id: string, query: object, correlationId?: string) {
     const result = await this.core.request({
       method: 'GET',
-      path: `/internal/super-admin/v1/investments`,
-      query: { ...query, whitelabelId: id },
+      path: '/internal/super-admin/v1/investments',
+      query: { ...(query as Record<string, unknown>), whitelabelId: id },
       correlationId,
     });
     return result.data;
