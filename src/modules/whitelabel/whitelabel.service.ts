@@ -1,8 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { LoorCoreClient } from '../../integrations/loor-core/loor-core.client';
 import { LoorCoreException } from '../../integrations/loor-core/loor-core.exception';
@@ -28,15 +31,9 @@ type PaginatedCore = {
 
 type DetailCore = { data: CoreWhitelabelSummary };
 
-/**
- * Control Plane Whitelabel rules (Arthur handoff + architecture):
- * - Core is source of truth (registry).
- * - CP authenticates operators, audits mutations, maps safe fields.
- * - No prototype IDs (wl_proto_*), no invented lifecycle beyond active/inactive.
- * - Create/update/status still go to Core when endpoints exist; Product Q-WL-01–03 open.
- */
 @Injectable()
 export class WhitelabelService {
+  private readonly logger = new Logger(WhitelabelService.name);
   private readonly base = '/internal/super-admin/v1/whitelabels';
 
   constructor(
@@ -91,7 +88,10 @@ export class WhitelabelService {
 
       const row = result.data?.data;
       if (!row) {
-        throw new NotFoundException('Whitelabel not found');
+        throw new NotFoundException({
+          code: 'E_WHITELABEL_NOT_FOUND',
+          message: 'Whitelabel not found',
+        });
       }
       return mapWhitelabel(row);
     } catch (error) {
@@ -113,7 +113,7 @@ export class WhitelabelService {
       });
 
       const mapped = result.data?.data ? mapWhitelabel(result.data.data) : null;
-      await this.audit.write({
+      await this.safeAudit({
         action: 'CREATE_WHITELABEL',
         superAdminId: meta.operatorId,
         resourceType: 'whitelabel',
@@ -128,7 +128,7 @@ export class WhitelabelService {
 
       return { data: mapped ?? result.data };
     } catch (error) {
-      await this.audit.write({
+      await this.safeAudit({
         action: 'CREATE_WHITELABEL',
         superAdminId: meta.operatorId,
         resourceType: 'whitelabel',
@@ -165,7 +165,7 @@ export class WhitelabelService {
       });
 
       const mapped = result.data?.data ? mapWhitelabel(result.data.data) : null;
-      await this.audit.write({
+      await this.safeAudit({
         action: 'UPDATE_WHITELABEL',
         superAdminId: meta.operatorId,
         resourceType: 'whitelabel',
@@ -181,7 +181,7 @@ export class WhitelabelService {
 
       return { data: mapped ?? result.data };
     } catch (error) {
-      await this.audit.write({
+      await this.safeAudit({
         action: 'UPDATE_WHITELABEL',
         superAdminId: meta.operatorId,
         resourceType: 'whitelabel',
@@ -221,7 +221,7 @@ export class WhitelabelService {
       });
 
       const mapped = result.data?.data ? mapWhitelabel(result.data.data) : null;
-      await this.audit.write({
+      await this.safeAudit({
         action: active ? 'ENABLE_WHITELABEL' : 'DISABLE_WHITELABEL',
         superAdminId: meta.operatorId,
         resourceType: 'whitelabel',
@@ -237,7 +237,7 @@ export class WhitelabelService {
 
       return { data: mapped ?? result.data };
     } catch (error) {
-      await this.audit.write({
+      await this.safeAudit({
         action: active ? 'ENABLE_WHITELABEL' : 'DISABLE_WHITELABEL',
         superAdminId: meta.operatorId,
         resourceType: 'whitelabel',
@@ -262,10 +262,41 @@ export class WhitelabelService {
     }
   }
 
+  /** Core already applied (or failed) — Audit must not invert the HTTP outcome. */
+  private async safeAudit(input: Parameters<AuditService['write']>[0]) {
+    try {
+      await this.audit.write(input);
+    } catch (error) {
+      this.logger.error({
+        msg: 'whitelabel_audit_failed',
+        action: input.action,
+        result: input.result,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   private rethrowCore(error: unknown): never {
     if (error instanceof LoorCoreException) {
+      if (error.code === 'E_SLUG_TAKEN') {
+        throw new ConflictException({
+          code: 'E_SLUG_TAKEN',
+          message: error.message,
+          correlationId: error.correlationId,
+        });
+      }
       if (error.getStatus() === 404) {
-        throw new NotFoundException(error.message);
+        throw new NotFoundException({
+          code: error.code || 'E_WHITELABEL_NOT_FOUND',
+          message: error.message,
+        });
+      }
+      if (error.getStatus() === 422) {
+        throw new UnprocessableEntityException({
+          code: error.code || 'E_VALIDATION',
+          message: error.message,
+          correlationId: error.correlationId,
+        });
       }
       if (error.getStatus() === 502) {
         throw new ServiceUnavailableException({

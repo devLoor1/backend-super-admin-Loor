@@ -17,7 +17,8 @@ export class MenuVisibilityController {
   @Get()
   @Roles(ROLES.SUPER_ADMIN, ROLES.SUPPORT_ADMIN, ROLES.READ_ONLY)
   @ApiOperation({
-    summary: 'Global Super Admin menu visibility (persisted; not authorization)',
+    summary:
+      'Global Super Admin menu visibility (sidebar only; not URL/RBAC). FINANCIAL/COMPLIANCE: no access.',
   })
   get() {
     return this.service.get();
@@ -26,7 +27,8 @@ export class MenuVisibilityController {
   @Put()
   @Roles(ROLES.SUPER_ADMIN)
   @ApiOperation({
-    summary: 'Replace full menu visibility map (idempotent PUT)',
+    summary:
+      'Replace full map (idempotent). Requires version when row exists. dashboard/configuracoes locked true.',
   })
   put(
     @Body() body: UpdateMenuVisibilityDto,
@@ -39,6 +41,7 @@ export class MenuVisibilityController {
       correlationId: req.correlationId,
       ip: req.ip,
       userAgent: req.headers['user-agent'],
+      version: body.version,
     });
   }
 }

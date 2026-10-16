@@ -116,6 +116,7 @@ model MenuVisibilityConfig {
   id         String   @id @default("global")
   scope      String   @default("global") @db.VarChar(32)
   visibility Json
+  version    Int      @default(0)
   updatedBy  String?  @map("updated_by")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
