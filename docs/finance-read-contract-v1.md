@@ -181,7 +181,7 @@ Free string from source row (e.g. investment status, `confirmed`, `completed`). 
 
 ### Movement item fields
 
-| Field | Type | Nullability |
+| Field | Type | Notes |
 | --- | --- | --- |
 | `id` | string | required |
 | `kind` | `in` \| `out` | required |
@@ -189,14 +189,37 @@ Free string from source row (e.g. investment status, `confirmed`, `completed`). 
 | `amountCents` | number (≥ 0) | required |
 | `currency` | `"BRL"` | required |
 | `date` | ISO string | required |
-| `description` | string | required |
+| `description` | string | free text — **embedded CPF/CNPJ redacted** |
 | `counterparty.type` | `investor` \| `entrepreneur` | required |
-| `counterparty.name` | string | required |
-| `counterparty.document` | string \| null | **masked** CPF/CNPJ (`***.***.***-12`) — never full |
-| `opportunity` | `{ id, name } \| null` | |
-| `reference` | object | required (may be sparse) |
+| `counterparty.name` | string | free text — **embedded CPF/CNPJ redacted** |
+| `counterparty.document` | string \| null | **masked** (`***.***.***-12`) — never full |
+| `opportunity` | `{ id, name } \| null` | `name` free text — **embedded CPF/CNPJ redacted** |
+| `reference` | object | string values redacted for embedded docs |
 | `provider` | string \| null | |
 | `status` | string | required |
+
+### Privacy contract (movements + investment detail opportunity.name)
+
+| Rule | Behavior |
+| --- | --- |
+| Dedicated document field | `counterparty.document` → mask last-2 (`***.***.***-XX`) |
+| Free text | `description`, `counterparty.name`, `opportunity.name`, string `reference.*` → redact formatted/raw CPF (11) / CNPJ (14) with mod-11 validation |
+| CNPJ mask in text | `**.***.***/****-XX` |
+| CPF mask in text | `***.***.***-XX` |
+| Layers | Core redacts at source; Nest re-applies (defense-in-depth) |
+| FE | May reject payload if unmasked doc detected — BE must never send unmasked |
+
+**Regression focus:** `category=refund&kind=out` where `opportunity.name` historically leaked full CNPJ.
+
+Envelope may include:
+
+```json
+"privacy": {
+  "documentFields": ["counterparty.document"],
+  "freeTextRedaction": ["description", "counterparty.name", "opportunity.name", "reference.* (string values)"],
+  "mask": "last-2-digits"
+}
+```
 
 ---
 

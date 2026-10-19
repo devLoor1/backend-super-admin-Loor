@@ -8,6 +8,9 @@ Ambiente alvo: Nest Control Plane `https://backend-super-admin-loor.onrender.com
 
 ## Demanda 1 — CRUD Whitelabels
 
+**Operational V1:** Create + name-only Update — ver [`whitelabel-operational-v1.md`](whitelabel-operational-v1.md).  
+Activate / Deactivate / DELETE / slug·baseUrl edit: **FE OFF** até Product autorizar.
+
 ### Endpoints públicos (Nest)
 
 | Method | Path | Auth | Notas |
@@ -15,10 +18,10 @@ Ambiente alvo: Nest Control Plane `https://backend-super-admin-loor.onrender.com
 | GET | `/api/whitelabels` | SA / Support / RO | Preservado |
 | GET | `/api/whitelabels/:id` | SA / Support / RO | Preservado |
 | POST | `/api/whitelabels` | SUPER_ADMIN | body: `{ name, slug, baseUrl }` |
-| PATCH | `/api/whitelabels/:id` | SUPER_ADMIN | `{ name?, slug?, baseUrl? }` |
-| PATCH | `/api/whitelabels/:id/activate` | SUPER_ADMIN | logical |
-| PATCH | `/api/whitelabels/:id/deactivate` | SUPER_ADMIN | logical |
-| DELETE | `/api/whitelabels/:id` | SUPER_ADMIN | **Alias de deactivate** — sem exclusão física / sem cascade |
+| PATCH | `/api/whitelabels/:id` | SUPER_ADMIN | **Operational V1:** `{ name }` only |
+| PATCH | `/api/whitelabels/:id/activate` | SUPER_ADMIN | logical — FE OFF |
+| PATCH | `/api/whitelabels/:id/deactivate` | SUPER_ADMIN | logical — FE OFF |
+| DELETE | `/api/whitelabels/:id` | SUPER_ADMIN | **Alias de deactivate** — FE OFF |
 
 ### Semântica de exclusão
 

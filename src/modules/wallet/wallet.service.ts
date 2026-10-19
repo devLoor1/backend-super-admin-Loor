@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { sanitizeWalletMovementsPayload } from '../../common/privacy/document-privacy';
 import { LoorCoreClient } from '../../integrations/loor-core/loor-core.client';
 
 /**
@@ -36,7 +37,8 @@ export class WalletService {
       query: query as Record<string, unknown>,
       correlationId,
     });
-    return result.data;
+    // Defense-in-depth: Core already redacts; Nest re-applies before FE.
+    return sanitizeWalletMovementsPayload(result.data);
   }
 
   /**

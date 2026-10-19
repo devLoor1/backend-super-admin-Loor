@@ -1,12 +1,15 @@
 # Whitelabel write contract V1 (Control Plane + Core)
 
-**Status:** mutations existem, mas FE deve manter **desabilitadas** até Product autorizar testes controlados em homolog.
+**Operational V1 (this cycle):** Create + **name-only** Update.  
+Ver contrato operacional completo: [`whitelabel-operational-v1.md`](whitelabel-operational-v1.md).
+
+**Status:** Backend pronto; FE habilita mutations **somente** após autorização Product de testes controlados em homolog.
 
 | Nest | Core |
 | --- | --- |
 | `POST /api/whitelabels` | `POST /internal/super-admin/v1/whitelabels` |
-| `PATCH /api/whitelabels/:id` | `PATCH /internal/super-admin/v1/whitelabels/:id` |
-| `PATCH …/activate` \| `…/deactivate` \| `DELETE` | `PATCH …/status` `{ active }` |
+| `PATCH /api/whitelabels/:id` | `PATCH /internal/super-admin/v1/whitelabels/:id` — Nest envia **somente** `{ name }` |
+| `PATCH …/activate` \| `…/deactivate` \| `DELETE` | `PATCH …/status` `{ active }` — **FE OFF** neste ciclo |
 
 `DELETE` Nest = **desativação lógica** (`isActive=false`). Sem exclusão física / sem cascade.
 
@@ -17,73 +20,68 @@
 | Field | Required | Notes |
 | --- | --- | --- |
 | `name` | yes | trimmed; empty → `E_VALIDATION` |
-| `slug` | yes | lowercased; unique; empty → `E_VALIDATION` |
-| `baseUrl` | yes | trimmed; empty → `E_VALIDATION` |
-| `isActive` | no | default `true` |
+| `slug` | yes | lowercased; **unique**; empty → `E_VALIDATION`; name **não** é único |
+| `baseUrl` | yes | absolute `http`/`https`; empty → `E_VALIDATION` |
+| `isActive` | no | default **`true`** (estado inicial ativo) |
 
-**Omitted vs null vs `""`:** Core trata via `String(input)` + `trim()`. `null`/`undefined` → `''` → validation error. Não há partial-null semantics além disso.
+**Omitted vs null vs `""`:** Nest ValidationPipe 400; Core `String(input)` + `trim()` → `''` → 422 `E_VALIDATION`.
 
-Response: `{ data: Detail }` (mesmo shape do GET detail).  
-Nest: `{ data: ControlPlaneWhitelabel }` + Audit `CREATE_WHITELABEL` (best-effort — falha de Audit **não** reverte HTTP se Core já persistiu).
+Response: `{ data: ControlPlaneWhitelabel }` (mesmo shape do GET detail) + Audit `CREATE_WHITELABEL` best-effort.
 
 Errors:
 
 | Case | HTTP | code |
 | --- | --- | --- |
-| missing fields | 422 | `E_VALIDATION` |
-| slug duplicado | **409** Nest / 422 Core | `E_SLUG_TAKEN` |
+| missing / invalid fields | 400 Nest / 422 Core | `E_VALIDATION` |
+| slug duplicado | **409** | `E_SLUG_TAKEN` |
 
 ---
 
-## Update body
+## Update body (Operational V1)
 
-Optional: `name`, `slug`, `baseUrl`. Campos omitidos não mudam.  
-Slug/baseUrl **podem** ser alterados no Core atual mesmo com tenant ativo — **Product deve decidir restrições** (ver lifecycle).
+**Only** `{ "name": "..." }`.
+
+- `slug` / `baseUrl` no body → **400** (`forbidNonWhitelisted`)
+- Core ainda aceitaria slug/baseUrl se chamado direto — Nest **não encaminha**
 
 ---
 
 ## Activate / Deactivate
 
-Body Core: `{ active: boolean }`.  
-Repetir activate em já-ativo (ou deactivate em já-inativo) é **idempotente** — salva o mesmo valor, retorna detail atualizado.
+Body Core: `{ active: boolean }`. Idempotente. **FE OFF** neste ciclo.
 
 ---
 
-## Lifecycle impacts (Core implantado)
+## Audit
 
-### Resolução de tenant (`ResolveWhitelabelService`)
+Após sucesso no Core, Audit é **best-effort**. Falha de Audit **não** altera HTTP 200/201 (log `whitelabel_audit_failed`).  
+Core = source of truth da mutation.
+
+---
+
+## Lifecycle impacts (Core)
+
+### Resolução de tenant
 
 `findBySlug` / `findByBaseUrl` / `findDefault` filtram **`is_active = true`**.
 
-Consequência de desativar:
+### Recuperação de senha
 
-- Host/slug do tenant **deixa de resolver** → cadastro, configs públicas e login por Origin/slug falham com whitelabel_not_found (exceto fluxos que usem id direto).
+`findByIdForMail` usa o WL da conta **mesmo inativo**; **não** faz fallback para o default.
 
-### Recuperação de senha (corrigido)
+### Whitelabel padrão
 
-Antes: `findByIdOrDefault` → se WL inativo, **caía no tenant padrão** (risco de URL/visual de outro tenant).
-
-Agora: `findByIdForMail` usa o WL da conta **mesmo inativo**; **não** faz fallback para o default.
-
-### Whitelabel padrão (`DEFAULT_WHITELABEL_SLUG` / `findDefault`)
-
-Desativar o padrão: fallback passa a ser o **menor `id` ativo**. Product deve decidir se o default pode ser desativado.
+Desativar o padrão: fallback = menor `id` ativo. Product decide se default pode ser desativado (ciclo futuro).
 
 ### slug / baseUrl em tenant ativo
 
-Core **permite** PATCH. Impactos: Origin matching, mail links, bookmarks. Sem migração automática de URLs.
+Fora do escopo Operational V1 (Nest bloqueia). Core ainda permite se chamado direto — Product decide restrições depois.
 
 ---
 
-## Audit / erros Nest
-
-- Após sucesso no Core, Audit é **best-effort** (log + segue 200/201).
-- `E_SLUG_TAKEN` propagado (não vira `CORE_HTTP_ERROR` genérico).
-
----
-
-## Product open questions (bloqueiam FE mutations)
+## Product open (fora deste ciclo FE)
 
 1. Default WL pode ser desativado?
-2. slug/baseUrl editáveis com tenant ativo? Precisa restrição ou migração?
-3. Política de testes controlados em homolog.
+2. slug/baseUrl editáveis com tenant ativo?
+3. Autorização explícita de testes controlados + limpeza de smoke rows.
+4. Idempotency-Key / optimistic concurrency (pendências BE documentadas no operational doc).

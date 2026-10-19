@@ -149,6 +149,15 @@ export class WhitelabelService {
   ) {
     this.assertNumericId(id);
 
+    // Operational V1: name-only — never forward slug/baseUrl even if somehow present.
+    const body = { name: dto.name.trim() };
+    if (!body.name) {
+      throw new BadRequestException({
+        code: 'E_VALIDATION',
+        message: 'name is required',
+      });
+    }
+
     let beforeData: ControlPlaneWhitelabel | null = null;
     try {
       beforeData = await this.detail(id, meta.correlationId);
@@ -160,7 +169,7 @@ export class WhitelabelService {
       const result = await this.core.request<DetailCore>({
         method: 'PATCH',
         path: `${this.base}/${id}`,
-        body: dto,
+        body,
         correlationId: meta.correlationId,
       });
 
@@ -171,8 +180,10 @@ export class WhitelabelService {
         resourceType: 'whitelabel',
         resourceId: id,
         whitelabelId: Number(id),
-        beforeData: beforeData ?? undefined,
-        afterData: { ...dto },
+        beforeData: beforeData
+          ? { name: beforeData.name, slug: beforeData.slug, baseUrl: beforeData.baseUrl }
+          : undefined,
+        afterData: { name: body.name },
         result: 'success',
         correlationId: meta.correlationId,
         ip: meta.ip,
@@ -187,8 +198,10 @@ export class WhitelabelService {
         resourceType: 'whitelabel',
         resourceId: id,
         whitelabelId: Number(id),
-        beforeData: beforeData ?? undefined,
-        afterData: { ...dto },
+        beforeData: beforeData
+          ? { name: beforeData.name, slug: beforeData.slug, baseUrl: beforeData.baseUrl }
+          : undefined,
+        afterData: { name: body.name },
         result: 'failed',
         correlationId: meta.correlationId,
         ip: meta.ip,

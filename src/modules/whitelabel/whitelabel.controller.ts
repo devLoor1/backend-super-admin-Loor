@@ -56,6 +56,11 @@ export class WhitelabelController {
 
   @Patch(':id')
   @Roles(ROLES.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Operational V1 — update name only',
+    description:
+      'Body must be `{ name }`. slug/baseUrl rejected (400). Activate/deactivate/DELETE stay OFF for FE.',
+  })
   update(
     @Param('id') id: string,
     @Body() dto: UpdateWhitelabelDto,
