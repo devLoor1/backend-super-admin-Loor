@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -43,6 +43,40 @@ export class AdministratorController {
     @Req() req: Request & { correlationId?: string },
   ) {
     return this.service.create(whitelabelId, body, {
+      operatorId: user.id,
+      correlationId: req.correlationId,
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
+  @Patch(':id')
+  @Roles(ROLES.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Update Whitelabel admin (name/email whitelist)' })
+  update(
+    @Param('whitelabelId') whitelabelId: string,
+    @Param('id') id: string,
+    @Body() body: { name?: string; email?: string },
+    @CurrentUser() user: AuthenticatedOperator,
+    @Req() req: Request & { correlationId?: string },
+  ) {
+    return this.service.update(whitelabelId, id, body, {
+      operatorId: user.id,
+      correlationId: req.correlationId,
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
+  @Patch(':id/activate')
+  @Roles(ROLES.SUPER_ADMIN)
+  activate(
+    @Param('whitelabelId') whitelabelId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedOperator,
+    @Req() req: Request & { correlationId?: string },
+  ) {
+    return this.service.setActive(whitelabelId, id, true, {
       operatorId: user.id,
       correlationId: req.correlationId,
       ip: req.ip,
