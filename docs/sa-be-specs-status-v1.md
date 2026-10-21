@@ -1,17 +1,17 @@
 # SA-BE specs — status de implementação
 
-Atualizado com a tranche imediata (P0 em andamento).
+Atualizado: tranche P1 (004–008) no Nest CP + Core.
 
 | Spec | Status | Notas |
 | --- | --- | --- |
 | **SA-BE-003** Bloqueio real | **Implantado (Core)** | `AccountAccessService` + check no `Auth` middleware + login Investor/Entrepreneur/Admin → `403 ACCOUNT_PAUSED` |
 | **SA-BE-001** Opportunities Admin parity | **Implantado (Nest+Core)** | POST/PATCH/approve/deny/archive + helpers entrepreneurs/contracts/investor-profiles; reusa `CreateService` / `ApproveService` / archive |
 | **SA-BE-002** Admins WL | **Parcial** | PATCH update (name/email) + activate/deactivate; reset-password/resend-invite **não** (sem fluxo Core seguro) |
-| **SA-BE-008** Audit | **Parcial** | Mutations novas usam `safeAudit`; filtros avançados GET `/api/audit` ainda pendentes |
-| **SA-BE-004** Investor 360 | Pendente | |
-| **SA-BE-005** Entrepreneur 360 | Pendente | |
-| **SA-BE-006** KYC detalhado | Pendente | |
-| **SA-BE-007** Operators CP | Pendente | |
+| **SA-BE-004** Investor 360 | **Implantado (Nest+Core)** | `GET /investors/:id/overview` → Core `InvestorOverviewService` (account/KYC/investments/payments/wallet WL) |
+| **SA-BE-005** Entrepreneur 360 | **Implantado (Nest+Core)** | `GET /entrepreneurs/:id/overview` → Core `EntrepreneurOverviewService` (account/company/opportunities) |
+| **SA-BE-006** KYC detalhado | **Implantado (Nest+Core)** | `GET /compliance/kyc` + `/:id`; case id = FaceMatch id; Face Match dentro do detail (sem menu separado) |
+| **SA-BE-007** Operators CP | **Implantado (Nest)** | CRUD local Prisma: list/create/update/activate/deactivate/roles; Argon2; audit; guard last SUPER_ADMIN |
+| **SA-BE-008** Audit | **Implantado (Nest)** | GET `/api/audit` com filtros operatorId/action/resource/whitelabel/result/from/to/search + paginação |
 
 ## Deny semantics
 

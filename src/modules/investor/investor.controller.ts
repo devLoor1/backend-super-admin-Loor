@@ -1,5 +1,5 @@
 import { Controller, Get, Param, Query, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '../../common/constants/roles';
@@ -16,6 +16,13 @@ export class InvestorController {
   @Roles(ROLES.SUPER_ADMIN, ROLES.SUPPORT_ADMIN, ROLES.COMPLIANCE_ADMIN, ROLES.READ_ONLY)
   list(@Query() query: PaginationQueryDto, @Req() req: Request & { correlationId?: string }) {
     return this.service.list(query, req.correlationId);
+  }
+
+  @Get(':id/overview')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.SUPPORT_ADMIN, ROLES.COMPLIANCE_ADMIN, ROLES.READ_ONLY)
+  @ApiOperation({ summary: 'Investor 360° aggregated overview (SA-BE-004)' })
+  overview(@Param('id') id: string, @Req() req: Request & { correlationId?: string }) {
+    return this.service.overview(id, req.correlationId);
   }
 
   @Get(':id')

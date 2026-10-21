@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma/prisma.service';
-import { PaginationQueryDto, buildPaginatedMeta } from '../../common/dto/pagination-query.dto';
+import { buildPaginatedMeta } from '../../common/dto/pagination-query.dto';
+import { AuditFiltersDto } from './dto/audit-filters.dto';
 
-const SENSITIVE = /(password|secret|token|api[_-]?key|authorization|credential)/i;
+const SENSITIVE = /(password|secret|token|api[_-]?key|authorization|credential|smtp)/i;
 
 export type AuditWriteInput = {
   action: string;
@@ -41,18 +42,30 @@ export class AuditService {
     });
   }
 
-  async list(query: PaginationQueryDto) {
+  async list(query: AuditFiltersDto) {
     const page = query.page ?? 1;
-    const perPage = query.perPage ?? 20;
-    const where = query.search
-      ? {
-          OR: [
-            { action: { contains: query.search } },
-            { resourceType: { contains: query.search } },
-            { resourceId: { contains: query.search } },
-          ],
-        }
-      : {};
+    const perPage = Math.min(query.perPage ?? 20, 100);
+
+    const where: Prisma.AuditLogWhereInput = {};
+    if (query.operatorId) where.superAdminId = query.operatorId;
+    if (query.action) where.action = query.action;
+    if (query.resourceType) where.resourceType = query.resourceType;
+    if (query.resourceId) where.resourceId = query.resourceId;
+    if (query.whitelabelId != null) where.whitelabelId = query.whitelabelId;
+    if (query.result) where.result = query.result;
+    if (query.from || query.to) {
+      where.createdAt = {};
+      if (query.from) where.createdAt.gte = new Date(query.from);
+      if (query.to) where.createdAt.lte = new Date(query.to);
+    }
+    if (query.search) {
+      where.OR = [
+        { action: { contains: query.search } },
+        { resourceType: { contains: query.search } },
+        { resourceId: { contains: query.search } },
+        { correlationId: { contains: query.search } },
+      ];
+    }
 
     const [total, data] = await this.prisma.$transaction([
       this.prisma.auditLog.count({ where }),

@@ -26,6 +26,7 @@ import { InvestmentModule } from './modules/investment/investment.module';
 import { InvestorModule } from './modules/investor/investor.module';
 import { MenuVisibilityModule } from './modules/menu-visibility/menu-visibility.module';
 import { OpportunityModule } from './modules/opportunity/opportunity.module';
+import { OperatorModule } from './modules/operator/operator.module';
 import { PaymentModule } from './modules/payment/payment.module';
 import { PlatformConfigModule } from './modules/platform-config/platform-config.module';
 import { SmtpModule } from './modules/smtp/smtp.module';
@@ -104,6 +105,7 @@ function hasPinoPretty(): boolean {
     GatewayModule,
     ComplianceModule,
     MenuVisibilityModule,
+    OperatorModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

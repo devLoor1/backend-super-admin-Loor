@@ -26,4 +26,13 @@ export class InvestorService {
     });
     return result.data;
   }
+
+  async overview(id: string, correlationId?: string) {
+    const result = await this.core.request({
+      method: 'GET',
+      path: `${this.base}/${id}/overview`,
+      correlationId,
+    });
+    return result.data;
+  }
 }

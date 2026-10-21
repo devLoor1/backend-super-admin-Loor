@@ -2,7 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '../../common/constants/roles';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { AuditFiltersDto } from './dto/audit-filters.dto';
 import { AuditService } from './audit.service';
 
 @ApiTags('Audit')
@@ -13,8 +13,12 @@ export class AuditController {
 
   @Get()
   @Roles(ROLES.SUPER_ADMIN, ROLES.COMPLIANCE_ADMIN, ROLES.READ_ONLY)
-  @ApiOperation({ summary: 'List Control Plane audit events' })
-  list(@Query() query: PaginationQueryDto) {
+  @ApiOperation({
+    summary: 'List Control Plane audit events',
+    description:
+      'Filters: operatorId, action, resourceType, resourceId, whitelabelId, result, from, to, search',
+  })
+  list(@Query() query: AuditFiltersDto) {
     return this.auditService.list(query);
   }
 }

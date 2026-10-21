@@ -8,14 +8,25 @@ export class KycService {
 
   constructor(private readonly core: LoorCoreClient) {}
 
-  list(query: PaginationQueryDto | Record<string, unknown>, correlationId?: string) {
-    return this.core.request({ method: 'GET', path: this.base, query, correlationId });
+  async list(query: PaginationQueryDto | Record<string, unknown>, correlationId?: string) {
+    const result = await this.core.request({
+      method: 'GET',
+      path: this.base,
+      query,
+      correlationId,
+    });
+    return result.data;
   }
 
   /**
    * Detail includes Face Match as part of KYC payload from Core — not a separate menu.
    */
-  detail(id: string, correlationId?: string) {
-    return this.core.request({ method: 'GET', path: `${this.base}/${id}`, correlationId });
+  async detail(id: string, correlationId?: string) {
+    const result = await this.core.request({
+      method: 'GET',
+      path: `${this.base}/${id}`,
+      correlationId,
+    });
+    return result.data;
   }
 }
