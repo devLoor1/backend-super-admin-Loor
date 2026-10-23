@@ -8,9 +8,13 @@ import {
   Post,
   Query,
   Req,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
+import { memoryStorage } from 'multer';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ROLES } from '../../common/constants/roles';
@@ -53,6 +57,61 @@ export class OpportunityController {
   ) {
     this.assertWhitelabelId(whitelabelId);
     return this.service.helperInvestorProfiles(whitelabelId, req.correlationId);
+  }
+
+  @Get('helpers/segments')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.SUPPORT_ADMIN, ROLES.READ_ONLY)
+  @ApiOperation({ summary: 'Segment catalog for Whitelabel (create/edit)' })
+  helperSegments(
+    @Query('whitelabelId') whitelabelId: string,
+    @Req() req: Request & { correlationId?: string },
+  ) {
+    this.assertWhitelabelId(whitelabelId);
+    return this.service.helperSegments(whitelabelId, req.correlationId);
+  }
+
+  @Get('helpers/resource-utilizations')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.SUPPORT_ADMIN, ROLES.READ_ONLY)
+  @ApiOperation({ summary: 'Resource utilization catalog for Whitelabel (create/edit)' })
+  helperResourceUtilizations(
+    @Query('whitelabelId') whitelabelId: string,
+    @Req() req: Request & { correlationId?: string },
+  ) {
+    this.assertWhitelabelId(whitelabelId);
+    return this.service.helperResourceUtilizations(whitelabelId, req.correlationId);
+  }
+
+  @Post('helpers/images')
+  @Roles(ROLES.SUPER_ADMIN)
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Upload opportunity image (banner or extra). Returns { data: { id } } for create/PATCH.',
+  })
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
+  helperImages(
+    @UploadedFile() file: Express.Multer.File,
+    @Body('folder') folder: string,
+    @Req() req: Request & { correlationId?: string },
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException({
+        code: 'E_VALIDATION',
+        message: 'image file is required (jpg/png/jpeg)',
+      });
+    }
+    const allowed = new Set(['opportunities/banner', 'opportunities/extra_images']);
+    if (!folder || !allowed.has(folder)) {
+      throw new BadRequestException({
+        code: 'E_VALIDATION',
+        message: 'folder must be opportunities/banner or opportunities/extra_images',
+      });
+    }
+    return this.service.helperImages(file, folder, req.correlationId);
   }
 
   @Get()

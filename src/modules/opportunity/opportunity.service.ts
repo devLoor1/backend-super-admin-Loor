@@ -69,6 +69,51 @@ export class OpportunityService {
     return result.data;
   }
 
+  async helperSegments(whitelabelId: string, correlationId?: string) {
+    const result = await this.core.request({
+      method: 'GET',
+      path: `${this.base}/helpers/segments`,
+      query: { whitelabelId },
+      correlationId,
+    });
+    return result.data;
+  }
+
+  async helperResourceUtilizations(whitelabelId: string, correlationId?: string) {
+    const result = await this.core.request({
+      method: 'GET',
+      path: `${this.base}/helpers/resource-utilizations`,
+      query: { whitelabelId },
+      correlationId,
+    });
+    return result.data;
+  }
+
+  async helperImages(
+    file: Express.Multer.File,
+    folder: string,
+    correlationId?: string,
+  ) {
+    const FormDataCtor = (globalThis as unknown as { FormData: typeof FormData }).FormData;
+    const BlobCtor = (globalThis as unknown as { Blob: typeof Blob }).Blob;
+    const form = new FormDataCtor();
+    form.append('folder', folder);
+    const bytes = Uint8Array.from(file.buffer);
+    form.append(
+      'image',
+      new BlobCtor([bytes], { type: file.mimetype || 'application/octet-stream' }),
+      file.originalname || 'image.jpg',
+    );
+    const result = await this.core.request({
+      method: 'POST',
+      path: `${this.base}/helpers/images`,
+      body: form,
+      multipart: true,
+      correlationId,
+    });
+    return result.data;
+  }
+
   async create(body: Record<string, unknown>, meta: AuditMeta) {
     try {
       const result = await this.core.request({

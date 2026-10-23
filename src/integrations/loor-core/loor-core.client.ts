@@ -33,22 +33,29 @@ export class LoorCoreClient {
     const url = `${baseUrl}${options.path}`;
 
     try {
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${token}`,
+        'X-Service-Name': clientId || 'loor-super-admin',
+        'X-Correlation-ID': correlationId,
+        Accept: 'application/json',
+        ...(options.headers || {}),
+      };
+      // Multipart must let axios set Content-Type with boundary.
+      if (!options.multipart) {
+        headers['Content-Type'] = 'application/json';
+      }
+
       const response = await firstValueFrom(
         this.http.request<T>({
           method: options.method,
           url,
           params: options.query,
           data: options.body,
-          timeout,
+          timeout: options.multipart ? Math.max(timeout, 60000) : timeout,
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
           validateStatus: () => true,
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'X-Service-Name': clientId,
-            'X-Correlation-ID': correlationId,
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            ...(options.headers || {}),
-          },
+          headers,
         }),
       );
 

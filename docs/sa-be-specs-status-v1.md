@@ -5,8 +5,8 @@ Atualizado: tranche P1 (004–008) no Nest CP + Core.
 | Spec | Status | Notas |
 | --- | --- | --- |
 | **SA-BE-003** Bloqueio real | **Implantado (Core)** | `AccountAccessService` + check no `Auth` middleware + login Investor/Entrepreneur/Admin → `403 ACCOUNT_PAUSED` |
-| **SA-BE-001** Opportunities Admin parity | **Implantado (Nest+Core)** | POST/PATCH/approve/deny/archive + helpers entrepreneurs/contracts/investor-profiles; reusa `CreateService` / `ApproveService` / archive |
-| **SA-BE-002** Admins WL | **Parcial** | PATCH update (name/email) + activate/deactivate; reset-password/resend-invite **não** (sem fluxo Core seguro) |
+| **SA-BE-001** Opportunities Admin parity | **Implantado (Nest+Core)** | Write V1 + helpers (entrepreneurs/contracts/investor-profiles/**segments/resource-utilizations/images**); detail com campos editáveis; contrato FE em `sa-be-001-opportunities-write-contract-v1.md` |
+| **SA-BE-002** Admins WL | **Parcial** | PATCH update (name/email) + activate/deactivate; leituras devolvem `name` + `fullName` (alias); reset-password/resend-invite **não** |
 | **SA-BE-004** Investor 360 | **Implantado (Nest+Core)** | `GET /investors/:id/overview` → Core `InvestorOverviewService` (account/KYC/investments/payments/wallet WL) |
 | **SA-BE-005** Entrepreneur 360 | **Implantado (Nest+Core)** | `GET /entrepreneurs/:id/overview` → Core `EntrepreneurOverviewService` (account/company/opportunities) |
 | **SA-BE-006** KYC detalhado | **Implantado (Nest+Core)** | `GET /compliance/kyc` + `/:id`; case id = FaceMatch id; Face Match dentro do detail (sem menu separado) |
