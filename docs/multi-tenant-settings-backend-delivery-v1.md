@@ -5,6 +5,8 @@
 **Escopo entregue nesta tranche:** SET-01, SMTP-01, AST-01, LEG-01 (P0/P1).  
 **Fora / Product gate:** BRD-01 (logo/favicon/PWA global), LEG-02 drafts/reacceptance, EML-01 templates, EML-02 events, SMTP-02 recipient policy.
 
+**Contrato FE operacional (SET-01 + SMTP-01):** ver [`set01-smtp01-fe-contract-v1.md`](./set01-smtp01-fe-contract-v1.md) — prevalece sobre o CFG histórico nos pontos alterados.
+
 ---
 
 ## Ordem do handoff → status
