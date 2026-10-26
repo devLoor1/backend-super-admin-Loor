@@ -5,7 +5,7 @@ import { buildPaginatedMeta } from '../../common/dto/pagination-query.dto';
 import { AuditFiltersDto } from './dto/audit-filters.dto';
 
 const SENSITIVE =
-  /(password|secret|token|api[_-]?key|authorization|credential|smtp|cpf|cnpj|spe[_-]?cnpj|document|pix)/i;
+  /(password|secret|token|api[_-]?key|authorization|credential|smtp|username|user[_-]?name|cpf|cnpj|spe[_-]?cnpj|document|pix)/i;
 
 export type AuditWriteInput = {
   action: string;

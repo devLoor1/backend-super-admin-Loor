@@ -28,8 +28,10 @@ import { MenuVisibilityModule } from './modules/menu-visibility/menu-visibility.
 import { OpportunityModule } from './modules/opportunity/opportunity.module';
 import { OperatorModule } from './modules/operator/operator.module';
 import { PaymentModule } from './modules/payment/payment.module';
+import { PlatformAssetsModule } from './modules/platform-assets/platform-assets.module';
 import { PlatformConfigModule } from './modules/platform-config/platform-config.module';
 import { SmtpModule } from './modules/smtp/smtp.module';
+import { TermsModule } from './modules/terms/terms.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { WhitelabelModule } from './modules/whitelabel/whitelabel.module';
 
@@ -95,7 +97,9 @@ function hasPinoPretty(): boolean {
     CompanyModule,
     AdministratorModule,
     PlatformConfigModule,
+    PlatformAssetsModule,
     SmtpModule,
+    TermsModule,
     OpportunityModule,
     InvestorModule,
     EntrepreneurModule,
