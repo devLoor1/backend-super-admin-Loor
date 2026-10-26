@@ -2,7 +2,7 @@
 
 **Data:** 2026-10-26  
 **Ambiente:** Nest `https://backend-super-admin-loor.onrender.com/api` → Core AWS  
-**Commits implantados (homolog smoke):** Core `08d5ef0` · Nest `8d661ec` (+ doc follow-up)  
+**Commits implantados:** Core `eab5d3d` (smoke runtime `08d5ef0` + provenance tweak) · Nest `29c57a8` em `dev`/`homolog`  
 **Auth:** Bearer operator JWT · writes `SUPER_ADMIN` · reads `SUPER_ADMIN` | `READ_ONLY`  
 **Tenant QA:** Whitelabel **id=8** (`sa-op-smoke-20261020-a1-c8170b06`) para Settings writes. SMTP PATCH smoke usou **id=7** (config existente) com restore.  
 **Não repetir smoke de descoberta** — evidências 26/10 já cobrem allowlist/reset/PATCH seguro.
