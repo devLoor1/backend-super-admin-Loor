@@ -7,6 +7,8 @@
 
 **Contrato FE operacional (SET-01 + SMTP-01):** ver [`set01-smtp01-fe-contract-v1.md`](./set01-smtp01-fe-contract-v1.md) — prevalece sobre o CFG histórico nos pontos alterados.
 
+**Continuação em revisão — 2026-10-27:** o [handoff Core/Nest AST + Settings compostos + EML-01/EMB-01](./email-template-operator-contract-v1.md#github-handoff-existing-backlog-and-release-order) centraliza branches GitHub, testes, limites, os 11 IDs existentes e a ordem de publicação. É um candidato em draft, ainda sem integração/deploy/aceite live; não altera o registro histórico desta tranche nem cria demandas duplicadas. Core será publicado por Backend/Ops antes do Nest e do frontend dependente.
+
 ---
 
 ## Ordem do handoff → status

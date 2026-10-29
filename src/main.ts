@@ -5,9 +5,14 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
+import {
+  EMAIL_TEMPLATES_BODY_PATH,
+  emailTemplatesBodyParser,
+} from './modules/email-templates/email-templates-body-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.use(EMAIL_TEMPLATES_BODY_PATH, emailTemplatesBodyParser);
   const config = app.get(ConfigService);
   const logger = app.get(Logger);
   app.useLogger(logger);
