@@ -2,8 +2,11 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { LoorCoreClient } from '../../integrations/loor-core/loor-core.client';
 import { AuditService } from '../audit/audit.service';
 import { AccountFiltersDto, AccountTipo } from './dto/account-filters.dto';
+import { CreateInvestorDto } from './dto/create-investor.dto';
+import { CreateEntrepreneurDto } from './dto/create-entrepreneur.dto';
 
 type AccountKind = 'investor' | 'entrepreneur' | 'admin';
+type AuditMeta = { operatorId: string; correlationId?: string; ip?: string; userAgent?: string };
 
 @Injectable()
 export class AccountsService {
@@ -128,6 +131,58 @@ export class AccountsService {
       userAgent: meta.userAgent,
     });
     return result.data;
+  }
+
+  async createInvestor(whitelabelId: string, body: CreateInvestorDto, meta: AuditMeta) {
+    this.assertNumericId(whitelabelId);
+    const result = await this.core.request({
+      method: 'POST',
+      path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/investors`,
+      body: { fullName: body.fullName, email: body.email, phone: body.phone, type: body.type },
+      correlationId: meta.correlationId,
+    });
+    await this.safeAudit({
+      action: 'CREATE_INVESTOR',
+      superAdminId: meta.operatorId,
+      resourceType: 'investor',
+      whitelabelId: Number(whitelabelId),
+      afterData: { email: body.email, type: body.type },
+      result: 'success',
+      correlationId: meta.correlationId,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+    return result.data;
+  }
+
+  async createEntrepreneur(whitelabelId: string, body: CreateEntrepreneurDto, meta: AuditMeta) {
+    this.assertNumericId(whitelabelId);
+    const result = await this.core.request({
+      method: 'POST',
+      path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/entrepreneurs`,
+      body: { fullName: body.fullName, email: body.email, phone: body.phone },
+      correlationId: meta.correlationId,
+    });
+    await this.safeAudit({
+      action: 'CREATE_ENTREPRENEUR',
+      superAdminId: meta.operatorId,
+      resourceType: 'entrepreneur',
+      whitelabelId: Number(whitelabelId),
+      afterData: { email: body.email },
+      result: 'success',
+      correlationId: meta.correlationId,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+    return result.data;
+  }
+
+  private async safeAudit(input: Parameters<AuditService['write']>[0]) {
+    try {
+      await this.audit.write(input);
+    } catch {
+      // audit failure does not fail the creation
+    }
   }
 
   private resolveKind(query: AccountFiltersDto): AccountKind {
