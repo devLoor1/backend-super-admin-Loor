@@ -7,6 +7,7 @@ import { CreateEntrepreneurDto } from './dto/create-entrepreneur.dto';
 
 type AccountKind = 'investor' | 'entrepreneur' | 'admin';
 type AuditMeta = { operatorId: string; correlationId?: string; ip?: string; userAgent?: string };
+type CreateMeta = AuditMeta & { idempotencyKey?: string };
 
 @Injectable()
 export class AccountsService {
@@ -133,13 +134,17 @@ export class AccountsService {
     return result.data;
   }
 
-  async createInvestor(whitelabelId: string, body: CreateInvestorDto, meta: AuditMeta) {
+  async createInvestor(whitelabelId: string, body: CreateInvestorDto, meta: CreateMeta) {
     this.assertNumericId(whitelabelId);
+    const headers: Record<string, string> = {};
+    if (meta.idempotencyKey) headers['Idempotency-Key'] = meta.idempotencyKey;
+
     const result = await this.core.request({
       method: 'POST',
       path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/investors`,
       body: { fullName: body.fullName, email: body.email, phone: body.phone, type: body.type },
       correlationId: meta.correlationId,
+      headers,
     });
     await this.safeAudit({
       action: 'CREATE_INVESTOR',
@@ -155,13 +160,17 @@ export class AccountsService {
     return result.data;
   }
 
-  async createEntrepreneur(whitelabelId: string, body: CreateEntrepreneurDto, meta: AuditMeta) {
+  async createEntrepreneur(whitelabelId: string, body: CreateEntrepreneurDto, meta: CreateMeta) {
     this.assertNumericId(whitelabelId);
+    const headers: Record<string, string> = {};
+    if (meta.idempotencyKey) headers['Idempotency-Key'] = meta.idempotencyKey;
+
     const result = await this.core.request({
       method: 'POST',
       path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/entrepreneurs`,
       body: { fullName: body.fullName, email: body.email, phone: body.phone },
       correlationId: meta.correlationId,
+      headers,
     });
     await this.safeAudit({
       action: 'CREATE_ENTREPRENEUR',
@@ -177,11 +186,53 @@ export class AccountsService {
     return result.data;
   }
 
+  async resendInvestorAccess(whitelabelId: string, investorId: string, meta: AuditMeta) {
+    this.assertNumericId(whitelabelId);
+    const result = await this.core.request({
+      method: 'POST',
+      path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/investors/${investorId}/resend-access`,
+      correlationId: meta.correlationId,
+    });
+    await this.safeAudit({
+      action: 'RESEND_ACCESS_INVESTOR',
+      superAdminId: meta.operatorId,
+      resourceType: 'investor',
+      resourceId: investorId,
+      whitelabelId: Number(whitelabelId),
+      result: 'success',
+      correlationId: meta.correlationId,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+    return result.data;
+  }
+
+  async resendEntrepreneurAccess(whitelabelId: string, entrepreneurId: string, meta: AuditMeta) {
+    this.assertNumericId(whitelabelId);
+    const result = await this.core.request({
+      method: 'POST',
+      path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/entrepreneurs/${entrepreneurId}/resend-access`,
+      correlationId: meta.correlationId,
+    });
+    await this.safeAudit({
+      action: 'RESEND_ACCESS_ENTREPRENEUR',
+      superAdminId: meta.operatorId,
+      resourceType: 'entrepreneur',
+      resourceId: entrepreneurId,
+      whitelabelId: Number(whitelabelId),
+      result: 'success',
+      correlationId: meta.correlationId,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+    return result.data;
+  }
+
   private async safeAudit(input: Parameters<AuditService['write']>[0]) {
     try {
       await this.audit.write(input);
     } catch {
-      // audit failure does not fail the creation
+      // audit failure does not fail the operation
     }
   }
 
