@@ -7,6 +7,8 @@ export interface LoorCoreRequestOptions {
   body?: unknown;
   /** When true, do not force Content-Type: application/json (use for multipart/FormData). */
   multipart?: boolean;
+  /** Override request timeout in ms. Multipart always gets at least 60 000 ms. */
+  timeoutMs?: number;
   correlationId?: string;
   headers?: Record<string, string>;
 }

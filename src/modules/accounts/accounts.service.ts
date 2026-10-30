@@ -144,6 +144,7 @@ export class AccountsService {
       path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/investors`,
       body: { fullName: body.fullName, email: body.email, phone: body.phone, type: body.type },
       correlationId: meta.correlationId,
+      timeoutMs: 60000,
       headers,
     });
     await this.safeAudit({
@@ -170,6 +171,7 @@ export class AccountsService {
       path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/entrepreneurs`,
       body: { fullName: body.fullName, email: body.email, phone: body.phone },
       correlationId: meta.correlationId,
+      timeoutMs: 60000,
       headers,
     });
     await this.safeAudit({

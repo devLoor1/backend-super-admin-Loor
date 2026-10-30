@@ -51,7 +51,7 @@ export class LoorCoreClient {
           url,
           params: options.query,
           data: options.body,
-          timeout: options.multipart ? Math.max(timeout, 60000) : timeout,
+          timeout: options.multipart ? Math.max(timeout, 60000) : (options.timeoutMs ?? timeout),
           maxBodyLength: Infinity,
           maxContentLength: Infinity,
           validateStatus: () => true,
