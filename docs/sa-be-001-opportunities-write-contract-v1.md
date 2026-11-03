@@ -112,9 +112,29 @@ Pré-condições Core:
 
 - WL ativo
 - Entrepreneur do mesmo WL + `personalInformationFilled`
-- Company canônica do entrepreneur (CNPJ alinhado)
+- Company canônica do entrepreneur (CNPJ alinhado) + CPF pessoal do responsável
 - Perfil com address/bank/pix quando o CreateService exigir
 - `modality`: `equity` \| `debt` (política Finapop pode bloquear equity)
+
+### Identidade autoritativa V1 (Product 2026-11-03) — FE read-only
+
+| Campo | Fonte autoritativa | Comportamento no Core |
+| --- | --- | --- |
+| `company_cnpj` | Company do Entrepreneur selecionado | Server overwrite; payload divergente → 422 |
+| `spe_cnpj` | **mesmo CNPJ da Company** na V1 | Server overwrite; payload divergente → 422 |
+| `cpf` (responsável) | CPF pessoal do Entrepreneur selecionado | Server overwrite; payload divergente → 422 |
+
+FE: preencher automaticamente e exibir read-only a partir dos cadastros Company/Entrepreneur. O Core **não** aceita valor concorrente.  
+**Limitação V1:** coluna `opportunities.spe_cnpj` continua `unique` — segunda Opportunity com o mesmo Company CNPJ pode falhar validação de unicidade até Produto revisar identidade SPE distinta.
+
+### Pix auto-fill V1 (Product 2026-11-03)
+
+| Tipo escolhido | Auto-fill | Não fazer |
+| --- | --- | --- |
+| `cnpj` | CNPJ canônico da Company (key omitida ok) | valor manual diferente da Company |
+| `cpf` | CPF pessoal do Entrepreneur (só no create de Opportunity) | gravar CPF como Pix no perfil bancário do Entrepreneur (permanece proibido) |
+| `email` / `phone` | **somente** se já existir chave Pix cadastrada do mesmo tipo no perfil | usar e-mail/telefone de contato do cadastro como auto-fill |
+| `random` | não — key explícita | — |
 
 Status inicial: **`review`**.  
 Sucesso: **201** `{ data: <detail SA> }`.
@@ -134,6 +154,8 @@ Fonte: `OpportunityEditableFieldsHelper.assertCanPatchAdmin`.
 | `review` | `about`, `promotional_video_url`, `description`, `name`, `business_name`, `resource_utilization`, `whatsapp_group`, `image_id`, `company_cnpj`, `spe_cnpj`, `cpf`, `segment_id`, `is_private` |
 | `active` | soft content + `resource_utilization`, `segment_id`, `is_private`, `company_cnpj` (**sem** `spe_cnpj` / `cpf`) |
 | `archived` / `finished` | bloqueado → `opportunity_not_editable` |
+
+`company_cnpj` / `spe_cnpj` / `cpf` no PATCH `review`: confirmation-only — se enviados, **devem** coincidir com Company CNPJ / Entrepreneur CPF; o Core regrava o canônico. Preferível omitir (FE read-only). Em `active`, `spe_cnpj`/`cpf` continuam fora da matriz.
 
 **Imutáveis neste PATCH:** modality, monetary, debt/equity, address, bank, pix, members, warranties, quotas, status, contract, investor_profile.
 
