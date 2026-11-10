@@ -1,15 +1,13 @@
 # White Label Showcase (Vitrine) — V1 implementable contract
 
-**Status:** Product-closed for V1 scope (Arthur 2026-11-10). Backend not yet implemented.  
-**Owner:** Whitelabel **id=6**, slug **`homologacao`**, environment **homolog only**.  
+**Status:** Product-closed + technical refinements (Arthur ACK 2026-11-10). Backend implemented in source; homolog deploy pending ops.  
+**Owner:** Whitelabel **id=6**, slug **`homologacao`**, environment **homolog only** (`SHOWCASE_ENABLED=true`).  
 **Fixture #4** from the FE demo is **not** an operational owner.  
 **Schema version:** `1`
 
-This document consolidates routes, schema, validation, concurrency, media, auth and public projection. Mock/demo behaviors are **not** Backend capabilities until implemented here.
-
 ---
 
-## Identities (do not collapse)
+## Identities
 
 | Role | Meaning |
 | --- | --- |
@@ -19,225 +17,177 @@ This document consolidates routes, schema, validation, concurrency, media, auth 
 
 ---
 
-## Routes (final proposal)
+## Routes
 
-### Administrative (Nest Control Plane → Core internal)
-
-Base: `/api/whitelabels/:whitelabelId/showcase`  
-Server **must** reject any `:whitelabelId` other than `6` in homolog with **404** `E_SHOWCASE_NOT_AVAILABLE` (stable; not a soft empty). Production: capability off → same 404.
+### Administrative (Nest → Core)
 
 | Method | Path | Roles | Success |
 | --- | --- | --- | --- |
-| GET | `/api/whitelabels/6/showcase` | SUPER_ADMIN, READ_ONLY | 200 |
-| PUT | `/api/whitelabels/6/showcase` | SUPER_ADMIN | 200 |
-| POST | `/api/whitelabels/6/platform/assets` | SUPER_ADMIN | 201 |
+| GET | `/api/whitelabels/:id/showcase` | SUPER_ADMIN, READ_ONLY | 200 |
+| PUT | `/api/whitelabels/:id/showcase` | SUPER_ADMIN | 200 |
+| POST | `/api/whitelabels/:id/platform/assets` | SUPER_ADMIN | 201 |
 
-**SUPPORT_ADMIN:** no access to showcase module (403 `E_FORBIDDEN` on showcase routes). Existing Settings/AST on other tenants **unchanged**.
+- Non-owner / capability off → **404** `E_SHOWCASE_NOT_AVAILABLE`
+- SUPPORT_ADMIN → **403** on showcase routes (Settings/AST elsewhere unchanged)
+- Upload: multipart `image` + **`slot=showcase`** (PNG/JPEG ≤ 20 MiB). Does **not** touch `main_area_image`.
+- PUT replace bytes on `slot=showcase` → **422** `E_SHOWCASE_ASSET_REPLACE_FORBIDDEN` (always POST new `assetRef`)
+- Admin preview URLs: response enriches `url` next to `assetRef`; editor may also `GET …/platform/assets/:assetRef` (fresh signed URL)
 
-Asset upload for showcase **reuses** AST pipeline with **`slot=showcase`** (new slot context). Must **not** write or clear `login|register|quick_profile.main_area_image`.
-
-| Method | Path | Notes |
-| --- | --- | --- |
-| POST | `…/platform/assets` | multipart `image` + `slot=showcase`; PNG/JPEG ≤ 20 MiB → new `asset_ref` |
-| GET | `…/platform/assets/:assetRef` | owner-scoped read |
-| PUT | `…/platform/assets/:assetRef` | **Forbidden for showcase-associated refs** in V1 (FE must POST new). Existing `main_area` PUT semantics stay for Settings only. |
-| DELETE | `…/platform/assets/:assetRef` | **Not used by showcase editor in V1** (disassociate only in document) |
-
-### Public (Core, no admin session)
-
-Resolved tenant must be WL6 / `homologacao` (Origin / `x-whitelabel-slug`). Other tenants → **404** `E_SHOWCASE_NOT_AVAILABLE`.
+### Public (Core)
 
 | Method | Path | Success |
 | --- | --- | --- |
 | GET | `/service/showcase` | 200 |
 
-Preserve existing app routes; do **not** assume app root hosts the vitrine.
+Tenant via Origin / `x-whitelabel-slug`. Non-owner → **404** `E_SHOWCASE_NOT_AVAILABLE`.
+
+`Cache-Control: private, no-store` on admin + public GET/PUT so signed URLs renew even when `revision` is unchanged.
 
 ---
 
-## First revision / concurrency
+## Concurrency / first write
 
-| State | `revision` | PUT `expectedRevision` |
+| State | GET | PUT `expectedRevision` |
 | --- | --- | --- |
-| Never saved | GET `configured:false`, `revision: null`, `document: null` | **`null`** (JSON null) for first write |
-| After N successful saves | `configured:true`, `revision: N` (positive int) | `N` |
+| Never saved | `configured:false`, `revision:null`, `document:null` | **`null`** |
+| After N saves | `configured:true`, `revision:N` | `N` → stores `N+1` |
 
-Rules:
-
-- PUT body includes full `document` + `schemaVersion` + `expectedRevision`.
-- Server compares `expectedRevision` atomically to stored revision (or null if absent).
-- Match → persist, bump revision to `N+1` (first save → `1`), return new revision + document.
-- Mismatch → **409** `E_SHOWCASE_REVISION_CONFLICT` with current `revision` + `document` (authoritative). FE keeps draft; no forced overwrite.
-- Uncertain transport → FE **GET** and compare content+revision; **never** auto-retry PUT.
-
-`schemaVersion` must be `1`. Unknown future versions → 422.
+- Mismatch → **409** `E_SHOWCASE_REVISION_CONFLICT` + current `revision` + `document`
+- Uncertain transport → FE GET compare; **no** auto re-PUT
+- `schemaVersion` must be `1`
 
 ---
 
-## Document schema (`schemaVersion: 1`)
+## PUT body (complete example)
 
-```ts
-type ShowcaseDocumentV1 = {
-  schemaVersion: 1
-  banner: {
-    images: ImageAssociation[] // length 1..4
+```json
+{
+  "schemaVersion": 1,
+  "expectedRevision": null,
+  "document": {
+    "schemaVersion": 1,
+    "banner": {
+      "images": [
+        {
+          "associationId": "11111111-1111-4111-8111-111111111111",
+          "assetRef": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "alt": "Banner principal",
+          "decorative": false
+        }
+      ]
+    },
+    "intro": {
+      "title": "Conheça as plataformas",
+      "subtitle": "Opcional",
+      "bodyMarkdown": "Texto com **negrito** e [link](https://example.com)."
+    },
+    "cards": [
+      {
+        "instanceId": "22222222-2222-4222-8222-222222222222",
+        "source": {
+          "whitelabelId": 6,
+          "slug": "homologacao",
+          "baseUrl": "https://homolog.loor.vc/wallet"
+        },
+        "displayName": "LOØR Homologação",
+        "shortDescription": "Descrição editorial do card.",
+        "colors": { "panel": "#0B1F33", "divider": "#F5A623" },
+        "logo": {
+          "assetRef": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "alt": "Logo LOØR"
+        },
+        "images": [
+          {
+            "associationId": "33333333-3333-4333-8333-333333333333",
+            "assetRef": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "alt": "",
+            "decorative": true
+          }
+        ],
+        "internalTitle": "Card A (só admin)"
+      }
+    ]
   }
-  intro: null | {
-    title: string
-    subtitle: string | null
-    bodyMarkdown: string // limited markdown, version 1 rules
-  }
-  cards: ShowcaseCardV1[] // length >= 1 on save
-}
-
-type ImageAssociation = {
-  associationId: string // UUID
-  assetRef: string      // owner-scoped UUID from POST assets
-  alt: string           // required if !decorative; empty if decorative
-  decorative: boolean
-}
-
-type ShowcaseCardV1 = {
-  instanceId: string // UUID
-  source: {
-    whitelabelId: number
-    slug: string
-    // baseUrl may be stored for editor display only; never becomes CTA
-    baseUrl?: string | null
-  }
-  // Editorial (not overwritten by later source changes)
-  displayName: string
-  shortDescription: string
-  colors: {
-    panel: string   // #RRGGBB
-    divider: string // #RRGGBB
-    // seeded from vitrine default palette; flagged client-side as editorial default
-  }
-  logo: {
-    assetRef: string
-    alt: string
-  }
-  images: ImageAssociation[] // length 1..4
-  // Optional editor-only fields MUST NOT appear on public projection
-  internalTitle?: string
 }
 ```
 
-Persist **only** durable refs (`assetRef`, association ids). Never persist signed URLs, `blob:`, Base64, or filesystem paths.
+Field name is **`intro`** (FE maps prototype `introduction` → `intro`).
 
 ---
 
-## Validation (PUT — public save)
+## Markdown
 
-Draft on FE may be incomplete. **PUT** requires a valid document:
+Allowed subset only (paragraphs, bold, italic, simple lists, http(s) links with text).  
+Content outside the subset → **422** `E_SHOWCASE_VALIDATION` (**reject**, no silent strip).
 
-| Rule | |
+---
+
+## Signed URLs / cache
+
+- TTL: **15 minutes** (`expiresIn=15m`) on each resolve.
+- Every admin/public GET regenerates URLs; **not** tied to document revision.
+- Responses: `Cache-Control: private, no-store`.
+- FE: limited recovery (re-GET showcase or asset) — avoid one request per broken image.
+
+---
+
+## Source eligibility on PUT
+
+| Case | Rule |
 | --- | --- |
-| Banner images | 1..4 |
-| Intro | optional (`null`). If object: `title` + `bodyMarkdown` required; `subtitle` optional |
-| Cards | ≥ 1 |
-| Each card | `displayName`, `shortDescription`, `logo.assetRef`+`alt`, valid `#RRGGBB` colors, images 1..4 |
-| Informative image | `decorative=false` ⇒ non-empty `alt` |
-| Decorative image | `decorative=true` ⇒ `alt` empty |
-| Markdown | limited subset (paragraphs, bold, italic, simple lists, http(s) links with text). No raw HTML/images/tables/code/headings nested lists — reject or strip consistently with public renderer |
-| All `assetRef` | must exist, belong to owner WL6, `slot=showcase` |
-| Source on add | must be **active** at inclusion time; inactive sources blocked for **new** cards |
-| Inactive source later | card **kept**; public still shows card; admin GET may include `warnings[]` (e.g. `SOURCE_INACTIVE`) |
+| New `instanceId` | Source must exist **and be active** |
+| Existing `instanceId`, **same** `source.whitelabelId` | Allowed even if source later inactive (preserved card) |
+| Existing `instanceId`, **changed** source | New source must pass active eligibility (reusing `instanceId` does **not** skip the check) |
 
-No arbitrary commercial card-count cap in V1. CTAs remain **demonstrative** (not stored as free URLs; no auto `baseUrl`→CTA).
+Admin GET may include `warnings[]` e.g. `{ code: "SOURCE_INACTIVE", instanceId, sourceWhitelabelId }`.  
+**Public projection omits** warnings, `assetRef`, `source`, `internalTitle`.
 
 ---
 
-## Response envelopes
+## Slug lookup (FE)
 
-### GET admin — unconfigured
+- `GET /api/whitelabels?search=&active=true` with **full pagination** until exhausted.
+- Qualify **0** or **>1** exact slug matches across all pages.
+- Incomplete/failed paging → **inconclusive** (never “not found”).
+- Early exit on first exact match is **not** sufficient to prove uniqueness.
 
-```json
-{
-  "data": {
-    "configured": false,
-    "revision": null,
-    "schemaVersion": 1,
-    "document": null,
-    "owner": { "whitelabelId": 6, "slug": "homologacao" }
-  }
-}
-```
+---
 
-### GET admin — configured
+## Public projection (render-only)
 
 ```json
 {
   "data": {
     "configured": true,
-    "revision": 2,
-    "schemaVersion": 1,
-    "document": { "...": "ShowcaseDocumentV1" },
-    "owner": { "whitelabelId": 6, "slug": "homologacao" },
-    "warnings": [{ "code": "SOURCE_INACTIVE", "instanceId": "...", "sourceWhitelabelId": 12 }]
-  }
-}
-```
-
-### PUT success
-
-```json
-{
-  "data": {
-    "configured": true,
-    "revision": 3,
-    "schemaVersion": 1,
-    "document": { "...": "ShowcaseDocumentV1" }
-  }
-}
-```
-
-### PUT conflict — 409
-
-```json
-{
-  "code": "E_SHOWCASE_REVISION_CONFLICT",
-  "message": "expectedRevision does not match current revision",
-  "data": {
-    "revision": 2,
-    "document": { "...": "current stored document" }
-  }
-}
-```
-
-### Public GET — unconfigured (WL6 only)
-
-```json
-{
-  "data": {
-    "configured": false,
-    "revision": null,
-    "document": null
-  }
-}
-```
-
-HTTP **200**. FE shows discrete empty state. No examples, no other-tenant data, no login Settings fallback.
-
-### Public GET — configured
-
-```json
-{
-  "data": {
-    "configured": true,
-    "revision": 3,
+    "revision": 1,
     "schemaVersion": 1,
     "document": {
-      "banner": { "images": [{ "associationId": "...", "url": "https://signed...", "alt": "...", "decorative": false }] },
-      "intro": null,
+      "banner": {
+        "images": [
+          {
+            "associationId": "…",
+            "url": "https://signed…",
+            "alt": "…",
+            "decorative": false
+          }
+        ]
+      },
+      "intro": { "title": "…", "subtitle": null, "bodyMarkdown": "…" },
       "cards": [
         {
-          "instanceId": "...",
-          "displayName": "...",
-          "shortDescription": "...",
-          "colors": { "panel": "#112233", "divider": "#445566" },
-          "logo": { "url": "https://signed...", "alt": "..." },
-          "images": [{ "associationId": "...", "url": "https://signed...", "alt": "...", "decorative": false }]
+          "instanceId": "…",
+          "displayName": "…",
+          "shortDescription": "…",
+          "colors": { "panel": "#0B1F33", "divider": "#F5A623" },
+          "logo": { "url": "https://signed…", "alt": "…" },
+          "images": [
+            {
+              "associationId": "…",
+              "url": "https://signed…",
+              "alt": "",
+              "decorative": true
+            }
+          ]
         }
       ]
     }
@@ -245,55 +195,34 @@ HTTP **200**. FE shows discrete empty state. No examples, no other-tenant data, 
 }
 ```
 
-Public omits: `internalTitle`, admin warnings detail policy TBD (prefer omit), audit, drafts, raw `assetRef` if `url` is provided (or include both — FE should prefer `url` for render and treat as ephemeral).
+Unconfigured (owner only): **200** `{ configured:false, revision:null, document:null }`.
 
 ---
 
-## Media URL validity / cache
+## Env (Core homolog)
 
-- `url` is a **read-time** signed/resolvable URL from storage (same family as AST `main_area`).
-- **Do not** persist `url` in the showcase document.
-- Clients must tolerate expiry: on broken image, re-GET showcase (or asset) for a fresh URL.
-- Cache-Control: public projection may be cached briefly by revision (`ETag` / `revision` query optional in a later iteration). V1 minimum: clients key cache by `revision`.
+```bash
+SHOWCASE_ENABLED=true
+SHOWCASE_OWNER_WHITELABEL_ID=6
+SHOWCASE_OWNER_SLUG=homologacao
+```
 
----
-
-## Errors (stable codes)
-
-| Code | HTTP | When |
-| --- | --- | --- |
-| `E_SHOWCASE_NOT_AVAILABLE` | 404 | Wrong tenant/env / prod off |
-| `E_SHOWCASE_REVISION_CONFLICT` | 409 | `expectedRevision` mismatch |
-| `E_SHOWCASE_VALIDATION` | 422 | Invalid document / markdown / colors / image rules |
-| `E_SHOWCASE_ASSET_INVALID` | 422 | Missing/foreign/`main_area` slot asset used in showcase |
-| `E_PLATFORM_ASSET_*` | 4xx | Existing AST upload errors (type/size) |
-| `E_FORBIDDEN` | 403 | SUPPORT_ADMIN or role lacking write/read as applicable |
-| 401 | — | Unauthenticated admin routes |
+Production: leave `SHOWCASE_ENABLED` unset/false.
 
 ---
 
-## Source lookup (reuse, no new search API)
+## Errors
 
-- `GET /api/whitelabels?search=<slug>&active=true&perPage=…`
-- FE: paginate until exhausted or exact slug found; incomplete page ≠ “not found”.
-- 0 exact → not found; \>1 exact → inconsistency state.
-- Seed card: `whitelabelId`, `slug`, `displayName←name`; `baseUrl` informational; logo/description manual; colors = vitrine default palette.
+| Code | HTTP |
+| --- | --- |
+| `E_SHOWCASE_NOT_AVAILABLE` | 404 |
+| `E_SHOWCASE_REVISION_CONFLICT` | 409 |
+| `E_SHOWCASE_VALIDATION` | 422 |
+| `E_SHOWCASE_ASSET_INVALID` | 422 |
+| `E_SHOWCASE_ASSET_REPLACE_FORBIDDEN` | 422 |
 
 ---
 
 ## Out of V1
 
-- Auto import of institutional identity across tenants  
-- Real commercial CTA URLs / `baseUrl` as destination  
-- Server-side draft / separate publish step  
-- Automatic orphan asset GC  
-- PUT-replace bytes on showcase refs  
-- Enabling any owner other than WL6 or production  
-
----
-
-## Implementation note
-
-Reuse: Nest↔Core bridge, AST FileHelper/PlatformAsset storage, SA role guards, public tenant resolver.  
-Extend: showcase document store + CAS, `slot=showcase`, owner gate, public `/service/showcase` projection, validation.  
-Do **not** put the showcase document in SET-01 Settings allowlist without CAS (SET-01 `version` remains advisory only).
+Auto identity import; real CTA URLs; server draft/publish step; orphan GC; enabling non-WL6 or production.
