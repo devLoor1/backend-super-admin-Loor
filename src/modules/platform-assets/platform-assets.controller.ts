@@ -7,6 +7,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
   Req,
   UploadedFile,
   UseInterceptors,
@@ -26,6 +27,41 @@ import { PlatformAssetsService } from './platform-assets.service';
 @Controller('whitelabels/:whitelabelId/platform/assets')
 export class PlatformAssetsController {
   constructor(private readonly service: PlatformAssetsService) {}
+
+  @Get()
+  @Roles(ROLES.SUPER_ADMIN, ROLES.READ_ONLY)
+  @ApiOperation({ summary: 'List platform assets by slot (default main_area)' })
+  list(
+    @Param('whitelabelId') whitelabelId: string,
+    @Query('slot') slot: string | undefined,
+    @Req() req: Request & { correlationId?: string },
+  ) {
+    return this.service.list(whitelabelId, slot, req.correlationId);
+  }
+
+  // Must stay before @Get(':assetRef') / other :assetRef routes.
+  @Post('copy')
+  @Roles(ROLES.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Copy a source WL main_area/showcase asset into this (owner) WL as slot=showcase',
+  })
+  copy(
+    @Param('whitelabelId') whitelabelId: string,
+    @Body() body: { sourceWhitelabelId?: unknown; sourceAssetRef?: unknown },
+    @CurrentUser() user: AuthenticatedOperator,
+    @Req() req: Request & { correlationId?: string },
+  ) {
+    return this.service.copy(
+      whitelabelId,
+      { sourceWhitelabelId: body?.sourceWhitelabelId, sourceAssetRef: body?.sourceAssetRef },
+      {
+        operatorId: user.id,
+        correlationId: req.correlationId,
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      },
+    );
+  }
 
   @Get(':assetRef')
   @Roles(ROLES.SUPER_ADMIN, ROLES.READ_ONLY)

@@ -21,6 +21,75 @@ export class PlatformAssetsService {
     private readonly audit: AuditService,
   ) {}
 
+  async list(whitelabelId: string, slot: string | undefined, correlationId?: string) {
+    const result = await this.core.request({
+      method: 'GET',
+      path: this.base(whitelabelId),
+      query: slot ? { slot } : undefined,
+      correlationId,
+    });
+    return result.data;
+  }
+
+  async logoOptions(whitelabelId: string, correlationId?: string) {
+    const result = await this.core.request({
+      method: 'GET',
+      path: `/internal/super-admin/v1/whitelabels/${whitelabelId}/logo-options`,
+      correlationId,
+    });
+    return result.data;
+  }
+
+  /** :whitelabelId is the DESTINATION showcase owner. Core copies bytes server-side. */
+  async copy(
+    whitelabelId: string,
+    body: { sourceWhitelabelId: unknown; sourceAssetRef: unknown },
+    meta: AuditMeta,
+  ) {
+    const sourceWhitelabelId = body?.sourceWhitelabelId;
+    const sourceAssetRef = body?.sourceAssetRef;
+    try {
+      const result = await this.core.request({
+        method: 'POST',
+        path: `${this.base(whitelabelId)}/copy`,
+        body: { sourceWhitelabelId, sourceAssetRef },
+        correlationId: meta.correlationId,
+      });
+      const newAssetRef = (result.data as { data?: { asset_ref?: string } })?.data?.asset_ref;
+      await this.safeAudit({
+        action: 'COPY_PLATFORM_ASSET_TO_SHOWCASE',
+        superAdminId: meta.operatorId,
+        resourceType: 'platform_asset',
+        resourceId: newAssetRef,
+        whitelabelId: Number(whitelabelId) || null,
+        afterData: {
+          slot: 'showcase',
+          sourceWhitelabelId,
+          sourceAssetRef,
+          assetRef: newAssetRef,
+        },
+        result: 'success',
+        correlationId: meta.correlationId,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
+      return result.data;
+    } catch (error) {
+      await this.safeAudit({
+        action: 'COPY_PLATFORM_ASSET_TO_SHOWCASE',
+        superAdminId: meta.operatorId,
+        resourceType: 'platform_asset',
+        whitelabelId: Number(whitelabelId) || null,
+        afterData: { slot: 'showcase', sourceWhitelabelId, sourceAssetRef },
+        result: 'failed',
+        correlationId: meta.correlationId,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
+      throw error;
+    }
+  }
+
   async get(whitelabelId: string, assetRef: string, correlationId?: string) {
     const result = await this.core.request({
       method: 'GET',
