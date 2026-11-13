@@ -221,6 +221,7 @@ Production: leave `SHOWCASE_ENABLED` unset/false.
 | `E_SHOWCASE_ASSET_INVALID` | 422 |
 | `E_SHOWCASE_ASSET_REPLACE_FORBIDDEN` | 422 |
 | `E_SHOWCASE_SCHEMA_DOWNGRADE` | 422 |
+| `E_SHOWCASE_OFFICIAL_LOGO_DOWNGRADE` | 422 |
 | `E_PLATFORM_ASSET_COPY_SLOT_INVALID` | 422 |
 | `E_PLATFORM_ASSET_NOT_FOUND` | 404 |
 | `E_PLATFORM_ASSET_FORBIDDEN` | 403 |
@@ -317,3 +318,81 @@ Rules:
   (otherwise 422 `E_PLATFORM_ASSET_COPY_SLOT_INVALID`).
 - Core copies the bytes server-side inside Drive into `platform/showcase` (new `Image` row + new `assetRef`, `wtlb_id = owner`, `slot = showcase`).
   Source asset and source settings are not modified. Use the returned `asset_ref` in `card.logo.assetRef` / `images[].assetRef`.
+
+---
+
+## Card logo: official vs custom (`card.logo` discriminated by `kind`)
+
+Same routes, same `schemaVersion` (2), same revision CAS. Nest showcase is a pass-through: **no Nest code change**; Core owns validation and resolution.
+Banner images and `card.images[]` are unchanged (assetRef only).
+
+### Stored / PUT shape
+
+**Custom** (owner-uploaded `slot=showcase` snapshot):
+
+```json
+{ "kind": "custom", "assetRef": "uuid", "alt": "…" }
+```
+
+A logo **without `kind` but with `assetRef`** is a legacy custom logo: accepted on PUT, normalized to `kind:"custom"` on read and when stored.
+Existing stored custom logos are **not** auto-migrated; they are rewritten with `kind` only on the next PUT of the document.
+
+**Official** (live bind to the brand's own published manifesto; no `assetRef`):
+
+```json
+{
+  "kind": "official",
+  "source": { "whitelabelId": 7, "slug": "laguna-homologacao" },
+  "variantId": "header",
+  "alt": "Logo Laguna"
+}
+```
+
+### PUT validation
+
+| Case | Result |
+| --- | --- |
+| `kind` missing + `assetRef` present | custom (legacy) |
+| `kind: "custom"` | `assetRef` required; must be a `slot=showcase` asset of the owner WL (`E_SHOWCASE_ASSET_INVALID` otherwise) |
+| `kind: "official"` | `source.whitelabelId` + `source.slug` must match an existing Whitelabel **and equal the card's `source.whitelabelId`/`slug`**; `variantId` non-empty string (1..80, e.g. `"header"`); `assetRef` forbidden; `alt` required (1..500) → else 422 `E_SHOWCASE_VALIDATION` |
+| any other `kind` | 422 `E_SHOWCASE_VALIDATION` |
+| Previous card (same `instanceId`) was official and new logo is custom/legacy **without explicit `kind:"custom"`** | **422 `E_SHOWCASE_OFFICIAL_LOGO_DOWNGRADE`** (guards stale FE payloads). Explicit `kind:"custom"` + `assetRef` is allowed (operator chose personalization). |
+
+### Resolution (GET admin + public) — `OfficialLogoResolver`
+
+1. Load Whitelabel by `source.whitelabelId`, verify `slug`.
+2. Origin = **protocol + host of `Whitelabel.baseUrl`** (path dropped: WL6 `https://homolog.loor.vc/wallet` → `https://homolog.loor.vc`).
+   Nothing is hardcoded per brand (Finapop included).
+3. `GET {origin}/branding/logo-manifest.json` — `Accept: application/json`, timeout 5 s, body ≤ 64 KiB, http(s) only, host fixed to `baseUrl`'s host, **redirects not followed**.
+4. Validate: `schemaVersion === 1`, `environment === "homolog"` (env `SHOWCASE_LOGO_MANIFEST_ENVIRONMENT`, default `homolog`), `whitelabelId` + `slug` equal the source WL, `versionKind` present, `variants[]` contains `variantId`, variant `url` is http(s).
+5. Short in-memory cache (ok 60 s, failures 15 s), shared by concurrent cards. Brand updates appear without re-saving the showcase.
+6. Any failure → `resolveStatus: "unavailable"`, `url: null`. **Never** falls back to another brand or variant.
+
+Enrichment/signed-asset I/O for official logos happens outside the PUT transaction (no row lock held during network calls).
+
+### Admin GET / PUT response
+
+```json
+// official
+{ "kind": "official", "source": { "whitelabelId": 7, "slug": "laguna-homologacao" }, "variantId": "header",
+  "alt": "…", "url": "https://…|null", "brandingVersion": "sha256:…|null", "contentDigest": null,
+  "resolveStatus": "ok|unavailable" }
+// custom (kind added on read, also for legacy stored logos)
+{ "kind": "custom", "assetRef": "uuid", "alt": "…", "url": "https://signed…|null" }
+```
+
+`warnings[]` adds `{ "code": "OFFICIAL_LOGO_UNAVAILABLE", "instanceId", "sourceWhitelabelId", "variantId", "reason" }` when an official logo cannot be resolved.
+
+### Public projection
+
+```json
+{ "kind": "custom",   "alt": "…", "url": "https://signed…|null" }
+{ "kind": "official", "variantId": "header", "alt": "…", "url": "https://…|null" }
+```
+
+No `assetRef`, no `source`. When unavailable, `url` is `null` (FE shows its placeholder; no other brand is substituted).
+
+### Finapop / new brands
+
+Backend does **not** know Finapop URLs. For a brand to be usable as `official`, its FE must publish `/branding/logo-manifest.json` at the origin of its `Whitelabel.baseUrl`
+(same shape as homolog LOØR/Laguna, with matching `whitelabelId` + `slug`). Until published, the logo resolves as `unavailable` (admin warning `OFFICIAL_LOGO_UNAVAILABLE`).
