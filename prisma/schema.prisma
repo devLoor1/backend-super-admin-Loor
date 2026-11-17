@@ -30,8 +30,9 @@ model SuperAdmin {
   createdAt    DateTime         @default(now()) @map("created_at")
   updatedAt    DateTime         @updatedAt @map("updated_at")
 
-  roles     SuperAdminRole[]
-  auditLogs AuditLog[]
+  roles         SuperAdminRole[]
+  auditLogs     AuditLog[]
+  provisionings WhitelabelProvisioning[]
 
   @@map("super_admins")
 }
@@ -122,4 +123,87 @@ model MenuVisibilityConfig {
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   @@map("menu_visibility_configs")
+}
+
+enum ProvisioningStatus {
+  PENDING
+  RUNNING
+  WAITING_MANUAL_ACTION
+  FAILED
+  COMPLETED
+  CANCELLED
+}
+
+enum ProvisioningStepStatus {
+  PENDING
+  RUNNING
+  WAITING_MANUAL_ACTION
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+enum ProvisioningStepKey {
+  CREATE_TENANT
+  APPLY_SETTINGS_TEMPLATE
+  UPLOAD_BRAND
+  INITIAL_ADMIN
+  TERMS
+  SMTP
+  GATEWAY_CONFIG
+  FE_DEPLOY_CHECK
+  DNS_CHECK
+  VALIDATE
+  DELIVER
+}
+
+/// Control-plane-only orchestration state for Whitelabel onboarding. Core DB is never touched here.
+model WhitelabelProvisioning {
+  id                       String               @id @default(cuid())
+  whitelabelId             Int?                 @map("whitelabel_id")
+  name                     String
+  slug                     String               @db.VarChar(80)
+  baseUrl                  String               @map("base_url") @db.VarChar(512)
+  status                   ProvisioningStatus   @default(PENDING)
+  currentStep              ProvisioningStepKey? @map("current_step")
+  requestedBy              String               @map("requested_by")
+  correlationId            String?              @map("correlation_id") @db.VarChar(64)
+  templateFromWhitelabelId Int?                 @map("template_from_whitelabel_id")
+  errorCode                String?              @map("error_code") @db.VarChar(64)
+  errorMessage             String?              @map("error_message") @db.VarChar(1000)
+  delivery                 Json?
+  startedAt                DateTime?            @map("started_at")
+  completedAt              DateTime?            @map("completed_at")
+  createdAt                DateTime             @default(now()) @map("created_at")
+  updatedAt                DateTime             @updatedAt @map("updated_at")
+
+  requestedByAdmin SuperAdmin                   @relation(fields: [requestedBy], references: [id])
+  steps            WhitelabelProvisioningStep[]
+
+  @@index([slug])
+  @@index([whitelabelId])
+  @@index([status])
+  @@map("whitelabel_provisionings")
+}
+
+model WhitelabelProvisioningStep {
+  id               String                 @id @default(cuid())
+  provisioningId   String                 @map("provisioning_id")
+  key              ProvisioningStepKey
+  status           ProvisioningStepStatus @default(PENDING)
+  attempts         Int                    @default(0)
+  payload          Json?
+  result           Json?
+  lastErrorCode    String?                @map("last_error_code") @db.VarChar(64)
+  lastErrorMessage String?                @map("last_error_message") @db.VarChar(1000)
+  startedAt        DateTime?              @map("started_at")
+  completedAt      DateTime?              @map("completed_at")
+  createdAt        DateTime               @default(now()) @map("created_at")
+  updatedAt        DateTime               @updatedAt @map("updated_at")
+
+  provisioning WhitelabelProvisioning @relation(fields: [provisioningId], references: [id], onDelete: Cascade)
+
+  @@unique([provisioningId, key])
+  @@index([status])
+  @@map("whitelabel_provisioning_steps")
 }

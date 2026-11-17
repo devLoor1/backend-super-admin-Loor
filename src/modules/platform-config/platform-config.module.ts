@@ -7,5 +7,6 @@ import { PlatformConfigService } from './platform-config.service';
   imports: [AuditModule],
   controllers: [PlatformConfigController],
   providers: [PlatformConfigService],
+  exports: [PlatformConfigService],
 })
 export class PlatformConfigModule {}

@@ -7,5 +7,6 @@ import { WhitelabelService } from './whitelabel.service';
   imports: [AuditModule],
   controllers: [WhitelabelController],
   providers: [WhitelabelService],
+  exports: [WhitelabelService],
 })
 export class WhitelabelModule {}

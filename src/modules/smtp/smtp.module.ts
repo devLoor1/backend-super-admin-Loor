@@ -7,5 +7,6 @@ import { SmtpService } from './smtp.service';
   imports: [AuditModule],
   controllers: [SmtpController],
   providers: [SmtpService],
+  exports: [SmtpService],
 })
 export class SmtpModule {}

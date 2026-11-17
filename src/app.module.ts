@@ -36,6 +36,7 @@ import { ShowcaseModule } from './modules/showcase/showcase.module';
 import { TermsModule } from './modules/terms/terms.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { WhitelabelModule } from './modules/whitelabel/whitelabel.module';
+import { WhitelabelProvisioningModule } from './modules/whitelabel-provisioning/whitelabel-provisioning.module';
 
 // pino-pretty is a devDependency: only use it when installed, so a production
 // install without devDependencies never crashes on logger bootstrap.
@@ -95,6 +96,7 @@ function hasPinoPretty(): boolean {
     AuditModule,
     DashboardModule,
     WhitelabelModule,
+    WhitelabelProvisioningModule,
     AccountsModule,
     CompanyModule,
     AdministratorModule,

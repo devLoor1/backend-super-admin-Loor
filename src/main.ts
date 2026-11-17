@@ -48,6 +48,7 @@ async function bootstrap() {
     .addTag('Auth')
     .addTag('Dashboard')
     .addTag('Whitelabels')
+    .addTag('Whitelabel Provisioning')
     .addTag('Accounts')
     .addTag('Administrators')
     .addTag('Platform Configuration')

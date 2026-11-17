@@ -7,5 +7,6 @@ import { GatewayService } from './gateway.service';
   imports: [AuditModule],
   controllers: [GatewayController],
   providers: [GatewayService],
+  exports: [GatewayService],
 })
 export class GatewayModule {}

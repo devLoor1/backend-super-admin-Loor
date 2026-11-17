@@ -76,6 +76,33 @@ export class WhitelabelService {
     }
   }
 
+  /**
+   * Core has no "get by slug" endpoint, so we reuse the list `search` filter and keep only the
+   * exact (case-insensitive) slug match. Substring hits (e.g. `acme` vs `acme-2`) are discarded.
+   * Returns the mapped Whitelabel or `null` when no exact match exists.
+   */
+  async findExactBySlug(
+    slug: string,
+    correlationId?: string,
+  ): Promise<ControlPlaneWhitelabel | null> {
+    const wanted = slug.trim().toLowerCase();
+    if (!wanted) return null;
+
+    const perPage = 100;
+    const maxPages = 20;
+    for (let page = 1; page <= maxPages; page += 1) {
+      const result = await this.list(
+        { page, perPage, search: slug.trim() },
+        correlationId,
+      );
+      const hit = result.data.find((row) => row.slug?.toLowerCase() === wanted);
+      if (hit) return hit;
+      const lastPage = Number(result.meta?.lastPage ?? 1);
+      if (page >= lastPage || result.data.length === 0) break;
+    }
+    return null;
+  }
+
   async detail(id: string, correlationId?: string): Promise<ControlPlaneWhitelabel> {
     this.assertNumericId(id);
 

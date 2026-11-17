@@ -7,5 +7,6 @@ import { AdministratorService } from './administrator.service';
   imports: [AuditModule],
   controllers: [AdministratorController],
   providers: [AdministratorService],
+  exports: [AdministratorService],
 })
 export class AdministratorModule {}

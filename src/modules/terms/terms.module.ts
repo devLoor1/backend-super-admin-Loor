@@ -7,5 +7,6 @@ import { TermsService } from './terms.service';
   imports: [AuditModule],
   controllers: [TermsController],
   providers: [TermsService],
+  exports: [TermsService],
 })
 export class TermsModule {}
