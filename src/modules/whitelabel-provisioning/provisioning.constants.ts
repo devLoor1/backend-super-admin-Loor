@@ -16,19 +16,17 @@ export const STEP_ORDER: readonly ProvisioningStepKey[] = [
 ];
 
 /**
- * Steps that need a human (Ops) outside the system. The runner parks the provisioning on them
- * (WAITING_MANUAL_ACTION) and only `POST …/steps/:stepKey/complete` can move them forward.
+ * Legacy manual gates. Shared-frontend homolog runs FE_DEPLOY_CHECK / DNS_CHECK
+ * automatically via FrontendReadinessService — keep this empty.
+ * `completeManual` remains for emergency attestation only if a key is re-listed here.
  */
-export const MANUAL_GATES: readonly ProvisioningStepKey[] = [
-  ProvisioningStepKey.FE_DEPLOY_CHECK,
-  ProvisioningStepKey.DNS_CHECK,
-];
+export const MANUAL_GATES: readonly ProvisioningStepKey[] = [];
 
 export function isManualGate(key: ProvisioningStepKey): boolean {
   return MANUAL_GATES.includes(key);
 }
 
-/** Checklist fields that must all be `true` to complete each manual gate. */
+/** Checklist fields that must all be `true` to complete each manual gate (unused while MANUAL_GATES is empty). */
 export const MANUAL_GATE_CHECKLIST: Readonly<
   Partial<Record<ProvisioningStepKey, readonly string[]>>
 > = {

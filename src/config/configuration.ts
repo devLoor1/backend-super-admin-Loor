@@ -21,4 +21,16 @@ export default () => ({
     timeoutMs: parseInt(process.env.LOOR_CORE_TIMEOUT_MS || '10000', 10),
     jwtTtlSeconds: parseInt(process.env.LOOR_CORE_JWT_TTL_SECONDS || '60', 10),
   },
+  /**
+   * Shared FE infrastructure bases (homolog). Not Whitelabel identity —
+   * provisioning appends `/w/{slug}` in PATH mode.
+   */
+  sharedFrontend: {
+    urlMode: process.env.PROVISIONING_FRONTEND_URL_MODE || 'PATH',
+    investorBaseUrl:
+      process.env.INVESTOR_BASE_URL || 'https://homolog.loor.vc',
+    entrepreneurBaseUrl:
+      process.env.ENTREPRENEUR_BASE_URL || 'https://homolog.empresa.loor.vc',
+    adminBaseUrl: process.env.ADMIN_BASE_URL || 'https://homolog.admin.loor.vc',
+  },
 });

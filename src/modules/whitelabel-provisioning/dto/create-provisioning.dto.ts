@@ -223,8 +223,21 @@ export class CreateProvisioningDto {
   enabledEnvironments?: Array<'INVESTOR' | 'ENTREPRENEUR' | 'ADMIN'>;
 
   @ApiPropertyOptional({
+    enum: ['HOSTNAME', 'PATH'],
+    description:
+      'HOSTNAME = {slug}.investor|empresa|admin.loor.vc (future). ' +
+      'PATH = shared Netlify /w/{slug} demo links (homolog without wildcard DNS). ' +
+      'Omitted → PROVISIONING_FRONTEND_URL_MODE env, else HOSTNAME.',
+  })
+  @IsOptional()
+  @IsIn(['HOSTNAME', 'PATH'])
+  urlMode?: 'HOSTNAME' | 'PATH';
+
+  @ApiPropertyOptional({
     default: false,
-    description: 'When false (default) FE_DEPLOY_CHECK becomes a manual gate.',
+    description:
+      'When true, skips automatic shared-frontend readiness (FE_DEPLOY_CHECK). ' +
+      'When false (default), Nest verifies DNS+HTTPS+bootstrap for enabled environments.',
   })
   @IsOptional()
   @IsBoolean()
@@ -243,7 +256,9 @@ export class CreateProvisioningDto {
 
   @ApiPropertyOptional({
     default: false,
-    description: 'When false (default) DNS_CHECK becomes a manual gate.',
+    description:
+      'When true, skips automatic DNS/HTTPS/tenant readiness (DNS_CHECK). ' +
+      'Default false runs the same public readiness checks as FE_DEPLOY_CHECK.',
   })
   @IsOptional()
   @IsBoolean()

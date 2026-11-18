@@ -1,10 +1,13 @@
 # Runbook — três frontends de Whitelabel em homologação (V1)
 
+> **Superseded for new work:** use [`whitelabel-shared-fe-homolog-runbook-v2.md`](./whitelabel-shared-fe-homolog-runbook-v2.md)  
+> (shared FE + automatic readiness). Keep this V1 only as rollback reference for per-WL Netlify sites.
+
 **Escopo:** homologação apenas. Produção = read-only (não alterar DNS/env/deploy de prod).  
-**Arquitetura:** Scenario B — **1 build Netlify por app por Whitelabel**, com `VITE_PLATFORM_SLUG` (e vars de marca) em build-time.  
+**Arquitetura (legado V1):** Scenario B — **1 build Netlify por app por Whitelabel**, com `VITE_PLATFORM_SLUG` (e vars de marca) em build-time.  
 **Não automatizado nesta V1:** criação de site Netlify, DNS, SSL, Netlify API.
 
-Análise de código (Investor / Entrepreneur / Admin + Core `ResolveWhitelabelService`) confirma que hostname **não** substitui o slug bakeado no frontend. Wildcard DNS sozinho **não** muda o tenant do FE.
+Análise de código (Investor / Entrepreneur / Admin + Core `ResolveWhitelabelService`) confirma que hostname **não** substitui o slug bakeado no frontend **no modelo V1**. No V2 (runtime tenant + bootstrap), o hostname **define** o tenant.
 
 ---
 

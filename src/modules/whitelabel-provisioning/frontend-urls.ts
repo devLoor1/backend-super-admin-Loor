@@ -42,6 +42,52 @@ export const FRONTEND_TO_CAPABILITY: Record<
 export type FrontendUrls = Partial<Record<FrontendEnvironment, string>> &
   Record<string, string | undefined>;
 
+export type FrontendUrlMode = 'HOSTNAME' | 'PATH';
+
+export const FRONTEND_URL_MODES = ['HOSTNAME', 'PATH'] as const;
+
+/**
+ * Default shared FE homolog bases (infrastructure only — not a Whitelabel).
+ * Override via Nest env: INVESTOR_BASE_URL / ENTREPRENEUR_BASE_URL / ADMIN_BASE_URL.
+ */
+export const DEFAULT_SHARED_FRONTEND_PATH_ORIGINS: Record<
+  FrontendEnvironment,
+  string
+> = {
+  investor: 'https://homolog.loor.vc',
+  entrepreneur: 'https://homolog.empresa.loor.vc',
+  admin: 'https://homolog.admin.loor.vc',
+};
+
+function trimOrigin(raw: string | undefined, fallback: string): string {
+  const value = (raw || fallback).trim().replace(/\/+$/, '');
+  return value || fallback;
+}
+
+/** Resolve PATH-mode bases from process env (Nest Control Plane). */
+export function sharedFrontendPathOrigins(): Record<
+  FrontendEnvironment,
+  string
+> {
+  return {
+    investor: trimOrigin(
+      process.env.INVESTOR_BASE_URL,
+      DEFAULT_SHARED_FRONTEND_PATH_ORIGINS.investor,
+    ),
+    entrepreneur: trimOrigin(
+      process.env.ENTREPRENEUR_BASE_URL,
+      DEFAULT_SHARED_FRONTEND_PATH_ORIGINS.entrepreneur,
+    ),
+    admin: trimOrigin(
+      process.env.ADMIN_BASE_URL,
+      DEFAULT_SHARED_FRONTEND_PATH_ORIGINS.admin,
+    ),
+  };
+}
+
+/** @deprecated Prefer sharedFrontendPathOrigins() so env overrides apply. */
+export const SHARED_FRONTEND_PATH_ORIGINS = DEFAULT_SHARED_FRONTEND_PATH_ORIGINS;
+
 export type DnsHostEntry = {
   environment: FrontendEnvironment;
   host: string;
@@ -49,6 +95,19 @@ export type DnsHostEntry = {
   status: 'ok';
   https: true;
 };
+
+export function normalizeFrontendUrlMode(raw: unknown): FrontendUrlMode {
+  if (typeof raw === 'string' && raw.trim().toUpperCase() === 'PATH') {
+    return 'PATH';
+  }
+  if (typeof raw === 'string' && raw.trim().toUpperCase() === 'HOSTNAME') {
+    return 'HOSTNAME';
+  }
+  const fromEnv = String(process.env.PROVISIONING_FRONTEND_URL_MODE || '')
+    .trim()
+    .toUpperCase();
+  return fromEnv === 'PATH' ? 'PATH' : 'HOSTNAME';
+}
 
 export function normalizeEnabledEnvironments(
   raw: unknown,
@@ -81,13 +140,22 @@ export function normalizeEnabledEnvironments(
 export function suggestedFrontendUrls(
   slug: string,
   enabled: readonly FrontendEnvironment[] = FRONTEND_ENVIRONMENTS,
+  mode: FrontendUrlMode = 'HOSTNAME',
 ): Record<FrontendEnvironment, string> {
   const safe = String(slug).trim().toLowerCase();
-  const all = {
-    investor: `https://${safe}.investor.loor.vc`,
-    entrepreneur: `https://${safe}.empresa.loor.vc`,
-    admin: `https://${safe}.admin.loor.vc`,
-  } as const;
+  const bases = sharedFrontendPathOrigins();
+  const all =
+    mode === 'PATH'
+      ? ({
+          investor: `${bases.investor}/w/${safe}`,
+          entrepreneur: `${bases.entrepreneur}/w/${safe}`,
+          admin: `${bases.admin}/w/${safe}`,
+        } as const)
+      : ({
+          investor: `https://${safe}.investor.loor.vc`,
+          entrepreneur: `https://${safe}.empresa.loor.vc`,
+          admin: `https://${safe}.admin.loor.vc`,
+        } as const);
   const out = {} as Record<FrontendEnvironment, string>;
   for (const env of enabled) {
     out[env] = all[env];
@@ -98,6 +166,14 @@ export function suggestedFrontendUrls(
 const HTTPS_URL_MAX = 512;
 
 export function normalizeHttpsOrigin(raw: unknown): string | null {
+  const full = normalizeHttpsUrl(raw);
+  if (!full) return null;
+  const url = new URL(full);
+  return `${url.protocol}//${url.host}`.toLowerCase();
+}
+
+/** https URL keeping pathname (for PATH-mode /w/{slug}); strips query/hash. */
+export function normalizeHttpsUrl(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const trimmed = raw.trim();
   if (!trimmed || trimmed.length > HTTPS_URL_MAX) return null;
@@ -110,7 +186,9 @@ export function normalizeHttpsOrigin(raw: unknown): string | null {
   if (url.protocol !== 'https:') return null;
   if (url.username || url.password) return null;
   if (!url.hostname || url.hostname.includes(' ')) return null;
-  return `${url.protocol}//${url.host}`.toLowerCase();
+  const path =
+    url.pathname === '/' ? '' : url.pathname.replace(/\/+$/, '') || '';
+  return `${url.protocol}//${url.host}${path}`.toLowerCase();
 }
 
 export function parseFrontendUrls(
@@ -126,7 +204,7 @@ export function parseFrontendUrls(
   const missing: string[] = [];
   const urls: Partial<Record<FrontendEnvironment, string>> = {};
   for (const env of enabled) {
-    const normalized = normalizeHttpsOrigin(row[env]);
+    const normalized = normalizeHttpsUrl(row[env]);
     if (!normalized) missing.push(env);
     else urls[env] = normalized;
   }
@@ -151,7 +229,7 @@ export function parseDnsHosts(
       continue;
     }
     const cell = entry as Record<string, unknown>;
-    const url = normalizeHttpsOrigin(cell.url);
+    const url = normalizeHttpsUrl(cell.url) ?? normalizeHttpsOrigin(cell.url);
     const status = cell.status;
     const https = cell.https;
     if (!url || status !== 'ok' || https !== true) {

@@ -172,6 +172,8 @@ function baseDto(
     name: 'Acme Capital',
     slug: 'acme-capital',
     baseUrl: 'https://acme-capital.wallet.loor.vc',
+    // Unit tests pin HOSTNAME so local Nest .env PATH mode does not skew expectations.
+    urlMode: 'HOSTNAME',
     skipDnsCheck: true,
     ...overrides,
   } as CreateProvisioningDto;
@@ -262,6 +264,40 @@ function setup() {
   };
 
   const secrets = new ProvisioningSecretsStore();
+  const frontendReadiness = {
+    verifyProvisioning: jest.fn(async (input: { slug: string }) => {
+      const slug = String(input.slug || 'acme-capital');
+      const urls = feUrls(slug);
+      const environments = (
+        ['investor', 'entrepreneur', 'admin'] as const
+      ).map((environment) => ({
+        environment,
+        capability:
+          environment === 'investor'
+            ? 'INVESTOR'
+            : environment === 'entrepreneur'
+              ? 'ENTREPRENEUR'
+              : 'ADMIN',
+        url: urls[environment],
+        host: new URL(urls[environment]).host,
+        resolves: true,
+        httpsOk: true,
+        httpStatus: 200,
+        bootstrapOk: true,
+        bootstrapSlug: slug,
+        expectedSlug: slug,
+        status: 'ok' as const,
+        error: null,
+      }));
+      return {
+        mode: 'shared_frontend' as const,
+        corePublicUrl: 'https://back.loor.vc/service',
+        enabledEnvironments: ['INVESTOR', 'ENTREPRENEUR', 'ADMIN'] as const,
+        environments,
+        ok: true,
+      };
+    }),
+  };
   const steps = new ProvisioningStepsService(
     fake.prisma as never,
     whitelabels as never,
@@ -272,6 +308,7 @@ function setup() {
     terms as never,
     platformAssets as never,
     secrets,
+    frontendReadiness as never,
   );
   const runner = new ProvisioningRunnerService(
     fake.prisma as never,
@@ -296,6 +333,7 @@ function setup() {
     platformAssets,
     audit,
     secrets,
+    frontendReadiness,
     service,
   };
 }
@@ -306,9 +344,9 @@ const statusOf = (
 ) => res.data.steps.find((s) => s.key === key)?.status;
 
 describe('WhitelabelProvisioningService (MVP)', () => {
-  it('happy path: skips optional steps, pauses on manual gate, completes after manual confirm', async () => {
+  it('happy path: automatic FE/DNS readiness completes without manual gates', async () => {
     const t = setup();
-    const created = await t.service.create(
+    const done = await t.service.create(
       baseDto({
         initialAdmin: {
           email: 'ana@acme.example',
@@ -320,23 +358,24 @@ describe('WhitelabelProvisioningService (MVP)', () => {
       OPERATOR,
     );
 
-    expect(created.data.status).toBe(ProvisioningStatus.WAITING_MANUAL_ACTION);
-    expect(created.data.currentStep).toBe(K.FE_DEPLOY_CHECK);
-    expect(created.data.whitelabelId).toBe(42);
-    expect(statusOf(created, K.CREATE_TENANT)).toBe(S.SUCCESS);
-    expect(statusOf(created, K.APPLY_SETTINGS_TEMPLATE)).toBe(S.SKIPPED);
-    expect(statusOf(created, K.UPLOAD_BRAND)).toBe(S.SKIPPED);
-    expect(statusOf(created, K.INITIAL_ADMIN)).toBe(S.SUCCESS);
-    expect(statusOf(created, K.TERMS)).toBe(S.SUCCESS);
-    expect(statusOf(created, K.SMTP)).toBe(S.SKIPPED);
-    expect(statusOf(created, K.GATEWAY_CONFIG)).toBe(S.SKIPPED);
-    expect(statusOf(created, K.FE_DEPLOY_CHECK)).toBe(S.WAITING_MANUAL_ACTION);
-    expect(statusOf(created, K.DNS_CHECK)).toBe(S.SKIPPED);
-    expect(statusOf(created, K.VALIDATE)).toBe(S.PENDING);
-    expect(created.data.progress).toEqual({
-      completed: 8,
+    expect(done.data.status).toBe(ProvisioningStatus.COMPLETED);
+    expect(done.data.currentStep).toBeNull();
+    expect(done.data.whitelabelId).toBe(42);
+    expect(statusOf(done, K.CREATE_TENANT)).toBe(S.SUCCESS);
+    expect(statusOf(done, K.APPLY_SETTINGS_TEMPLATE)).toBe(S.SKIPPED);
+    expect(statusOf(done, K.UPLOAD_BRAND)).toBe(S.SKIPPED);
+    expect(statusOf(done, K.INITIAL_ADMIN)).toBe(S.SUCCESS);
+    expect(statusOf(done, K.TERMS)).toBe(S.SUCCESS);
+    expect(statusOf(done, K.SMTP)).toBe(S.SKIPPED);
+    expect(statusOf(done, K.GATEWAY_CONFIG)).toBe(S.SKIPPED);
+    expect(statusOf(done, K.FE_DEPLOY_CHECK)).toBe(S.SUCCESS);
+    expect(statusOf(done, K.DNS_CHECK)).toBe(S.SKIPPED);
+    expect(statusOf(done, K.VALIDATE)).toBe(S.SUCCESS);
+    expect(statusOf(done, K.DELIVER)).toBe(S.SUCCESS);
+    expect(done.data.progress).toEqual({
+      completed: 11,
       total: 11,
-      percentage: 73,
+      percentage: 100,
     });
     expect(t.whitelabels.create).toHaveBeenCalledTimes(1);
     expect(t.administrators.create).toHaveBeenCalledWith(
@@ -345,26 +384,10 @@ describe('WhitelabelProvisioningService (MVP)', () => {
       expect.anything(),
     );
     expect(t.terms.publish).toHaveBeenCalledTimes(1);
+    expect(t.frontendReadiness.verifyProvisioning).toHaveBeenCalled();
     expect(t.audit.write).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'CREATE_WHITELABEL_PROVISIONING' }),
     );
-
-    const done = await t.service.completeManual(
-      created.data.id,
-      K.FE_DEPLOY_CHECK,
-      feComplete('ok'),
-      OPERATOR,
-    );
-
-    expect(done.data.status).toBe(ProvisioningStatus.COMPLETED);
-    expect(done.data.currentStep).toBeNull();
-    expect(done.data.progress).toEqual({
-      completed: 11,
-      total: 11,
-      percentage: 100,
-    });
-    expect(statusOf(done, K.VALIDATE)).toBe(S.SUCCESS);
-    expect(statusOf(done, K.DELIVER)).toBe(S.SUCCESS);
     expect(done.data.delivery).toMatchObject({
       slug: 'acme-capital',
       whitelabelId: 42,
@@ -384,46 +407,28 @@ describe('WhitelabelProvisioningService (MVP)', () => {
     expect(
       done.data.steps.find((s) => s.key === K.FE_DEPLOY_CHECK)?.result,
     ).toMatchObject({
+      mode: 'shared_frontend',
       urls: {
         investor: { url: 'https://acme-capital.investor.loor.vc', status: 'ok' },
       },
     });
-    expect(t.secrets.has(created.data.id)).toBe(false);
+    expect(t.secrets.has(done.data.id)).toBe(false);
   });
 
-  it('parks on both manual gates in order (FE then DNS)', async () => {
+  it('runs FE then DNS readiness automatically when DNS check is enabled', async () => {
     const t = setup();
-    const created = await t.service.create(
+    const done = await t.service.create(
       baseDto({ skipDnsCheck: false }),
       OPERATOR,
     );
-    expect(created.data.currentStep).toBe(K.FE_DEPLOY_CHECK);
-
-    const afterFe = await t.service.completeManual(
-      created.data.id,
-      K.FE_DEPLOY_CHECK,
-      feComplete(),
-      OPERATOR,
+    expect(done.data.status).toBe(ProvisioningStatus.COMPLETED);
+    expect(statusOf(done, K.FE_DEPLOY_CHECK)).toBe(S.SUCCESS);
+    expect(statusOf(done, K.DNS_CHECK)).toBe(S.SUCCESS);
+    expect(t.frontendReadiness.verifyProvisioning.mock.calls.length).toBeGreaterThanOrEqual(
+      2,
     );
-    expect(afterFe.data.status).toBe(ProvisioningStatus.WAITING_MANUAL_ACTION);
-    expect(afterFe.data.currentStep).toBe(K.DNS_CHECK);
     expect(
-      afterFe.data.steps.find((s) => s.key === K.FE_DEPLOY_CHECK)?.result,
-    ).toMatchObject({
-      urls: {
-        investor: { url: 'https://acme-capital.investor.loor.vc', status: 'ok' },
-      },
-    });
-
-    const afterDns = await t.service.completeManual(
-      created.data.id,
-      K.DNS_CHECK,
-      dnsComplete(),
-      OPERATOR,
-    );
-    expect(afterDns.data.status).toBe(ProvisioningStatus.COMPLETED);
-    expect(
-      afterDns.data.steps.find((s) => s.key === K.DNS_CHECK)?.result,
+      done.data.steps.find((s) => s.key === K.DNS_CHECK)?.result,
     ).toMatchObject({
       hosts: {
         investor: {
@@ -433,13 +438,43 @@ describe('WhitelabelProvisioningService (MVP)', () => {
         },
       },
     });
-    expect(afterDns.data.delivery).toMatchObject({
+    expect(done.data.delivery).toMatchObject({
       urls: {
         investor: 'https://acme-capital.investor.loor.vc',
         entrepreneur: 'https://acme-capital.empresa.loor.vc',
         admin: 'https://acme-capital.admin.loor.vc',
       },
     });
+  });
+
+  it('fails FE_DEPLOY_CHECK when shared readiness fails', async () => {
+    const t = setup();
+    t.frontendReadiness.verifyProvisioning.mockResolvedValueOnce({
+      mode: 'shared_frontend',
+      corePublicUrl: 'https://back.loor.vc/service',
+      enabledEnvironments: ['INVESTOR', 'ENTREPRENEUR', 'ADMIN'],
+      environments: [
+        {
+          environment: 'investor',
+          capability: 'INVESTOR',
+          url: 'https://acme-capital.investor.loor.vc',
+          host: 'acme-capital.investor.loor.vc',
+          resolves: false,
+          httpsOk: false,
+          httpStatus: null,
+          bootstrapOk: false,
+          bootstrapSlug: null,
+          expectedSlug: 'acme-capital',
+          status: 'failed',
+          error: 'DNS does not resolve',
+        },
+      ],
+      ok: false,
+    } as never);
+    const failed = await t.service.create(baseDto(), OPERATOR);
+    expect(failed.data.status).toBe(ProvisioningStatus.FAILED);
+    expect(failed.data.currentStep).toBe(K.FE_DEPLOY_CHECK);
+    expect(failed.data.errorCode).toBe('E_FRONTEND_READINESS_FAILED');
   });
 
   it('completes without pausing when both manual checks are skipped', async () => {
@@ -496,10 +531,18 @@ describe('WhitelabelProvisioningService (MVP)', () => {
 
   it('rejects a second provisioning for the same slug while one is active (409)', async () => {
     const t = setup();
-    await t.service.create(baseDto(), OPERATOR); // parks on FE_DEPLOY_CHECK
+    // Force an in-flight provisioning (RUNNING is active; simulate by leaving PENDING).
+    const first = await t.service.create(
+      baseDto({ skipFeDeployCheck: true }),
+      OPERATOR,
+    );
+    // Flip completed → RUNNING so a concurrent create is blocked.
+    t.provisionings[0].status = ProvisioningStatus.RUNNING;
+    t.provisionings[0].completedAt = null;
     await expect(t.service.create(baseDto(), OPERATOR)).rejects.toBeInstanceOf(
       ConflictException,
     );
+    expect(first.data.status).toBe(ProvisioningStatus.COMPLETED);
     expect(t.whitelabels.create).toHaveBeenCalledTimes(1);
   });
 
@@ -647,9 +690,12 @@ describe('WhitelabelProvisioningService (MVP)', () => {
     expect(bad.data.errorCode).toBe('E_EMAIL_TAKEN');
   });
 
-  it('completeManual rejects non-manual steps such as CREATE_TENANT', async () => {
+  it('completeManual rejects all steps (manual gates retired)', async () => {
     const t = setup();
-    const created = await t.service.create(baseDto(), OPERATOR);
+    const created = await t.service.create(
+      baseDto({ skipFeDeployCheck: true }),
+      OPERATOR,
+    );
     await expect(
       t.service.completeManual(
         created.data.id,
@@ -661,93 +707,22 @@ describe('WhitelabelProvisioningService (MVP)', () => {
     await expect(
       t.service.completeManual(
         created.data.id,
-        K.VALIDATE,
-        { checklist: {} },
-        OPERATOR,
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('completeManual requires every relevant checklist item to be true', async () => {
-    const t = setup();
-    const created = await t.service.create(baseDto(), OPERATOR);
-    await expect(
-      t.service.completeManual(
-        created.data.id,
         K.FE_DEPLOY_CHECK,
-        {
-          checklist: { investor: true, entrepreneur: true, admin: false },
-          urls: feUrls(),
-        },
-        OPERATOR,
-      ),
-    ).rejects.toBeInstanceOf(UnprocessableEntityException);
-    // wrong checklist family for the gate
-    await expect(
-      t.service.completeManual(
-        created.data.id,
-        K.FE_DEPLOY_CHECK,
-        { checklist: { resolves: true, https: true }, urls: feUrls() },
-        OPERATOR,
-      ),
-    ).rejects.toBeInstanceOf(UnprocessableEntityException);
-    const still = await t.service.get(created.data.id);
-    expect(still.data.status).toBe(ProvisioningStatus.WAITING_MANUAL_ACTION);
-  });
-
-  it('completeManual rejects FE_DEPLOY_CHECK without https urls', async () => {
-    const t = setup();
-    const created = await t.service.create(baseDto(), OPERATOR);
-    await expect(
-      t.service.completeManual(
-        created.data.id,
-        K.FE_DEPLOY_CHECK,
-        { checklist: { investor: true, entrepreneur: true, admin: true } },
+        feComplete(),
         OPERATOR,
       ),
     ).rejects.toMatchObject({
-      response: expect.objectContaining({ code: 'E_FRONTEND_URLS_REQUIRED' }),
+      response: expect.objectContaining({ code: 'E_STEP_NOT_MANUAL' }),
     });
-    await expect(
-      t.service.completeManual(
-        created.data.id,
-        K.FE_DEPLOY_CHECK,
-        {
-          checklist: { investor: true, entrepreneur: true, admin: true },
-          urls: {
-            investor: 'http://insecure.example',
-            entrepreneur: feUrls().entrepreneur,
-            admin: feUrls().admin,
-          },
-        },
-        OPERATOR,
-      ),
-    ).rejects.toMatchObject({
-      response: expect.objectContaining({ code: 'E_FRONTEND_URLS_REQUIRED' }),
-    });
-  });
-
-  it('completeManual rejects DNS_CHECK without hosts attestation', async () => {
-    const t = setup();
-    const created = await t.service.create(
-      baseDto({ skipDnsCheck: false }),
-      OPERATOR,
-    );
-    await t.service.completeManual(
-      created.data.id,
-      K.FE_DEPLOY_CHECK,
-      feComplete(),
-      OPERATOR,
-    );
     await expect(
       t.service.completeManual(
         created.data.id,
         K.DNS_CHECK,
-        { checklist: { resolves: true, https: true } },
+        dnsComplete(),
         OPERATOR,
       ),
     ).rejects.toMatchObject({
-      response: expect.objectContaining({ code: 'E_DNS_HOSTS_REQUIRED' }),
+      response: expect.objectContaining({ code: 'E_STEP_NOT_MANUAL' }),
     });
   });
 
@@ -774,8 +749,57 @@ describe('WhitelabelProvisioningService (MVP)', () => {
     });
   });
 
-  it('Finapop-style: only INVESTOR+ADMIN required on FE gate; entrepreneur omitted from delivery', async () => {
+  it('Finapop-style: only INVESTOR+ADMIN verified; entrepreneur omitted from delivery', async () => {
     const t = setup();
+    t.frontendReadiness.verifyProvisioning.mockImplementation((async (input: {
+      slug: string;
+      enabledEnvironments?: unknown;
+    }) => {
+      const slug = String(input.slug || 'acme-capital');
+      const enabled = Array.isArray(input.enabledEnvironments)
+        ? input.enabledEnvironments
+        : ['INVESTOR', 'ADMIN'];
+      const environments: Array<Record<string, unknown>> = [];
+      if (enabled.includes('INVESTOR')) {
+        environments.push({
+          environment: 'investor',
+          capability: 'INVESTOR',
+          url: `https://${slug}.investor.loor.vc`,
+          host: `${slug}.investor.loor.vc`,
+          resolves: true,
+          httpsOk: true,
+          httpStatus: 200,
+          bootstrapOk: true,
+          bootstrapSlug: slug,
+          expectedSlug: slug,
+          status: 'ok',
+          error: null,
+        });
+      }
+      if (enabled.includes('ADMIN')) {
+        environments.push({
+          environment: 'admin',
+          capability: 'ADMIN',
+          url: `https://${slug}.admin.loor.vc`,
+          host: `${slug}.admin.loor.vc`,
+          resolves: true,
+          httpsOk: true,
+          httpStatus: 200,
+          bootstrapOk: true,
+          bootstrapSlug: slug,
+          expectedSlug: slug,
+          status: 'ok',
+          error: null,
+        });
+      }
+      return {
+        mode: 'shared_frontend',
+        corePublicUrl: 'https://back.loor.vc/service',
+        enabledEnvironments: enabled,
+        environments,
+        ok: true,
+      };
+    }) as never);
     const created = await t.service.create(
       baseDto({
         enabledEnvironments: ['INVESTOR', 'ADMIN'],
@@ -783,53 +807,18 @@ describe('WhitelabelProvisioningService (MVP)', () => {
       }),
       OPERATOR,
     );
-    expect(created.data.currentStep).toBe(K.FE_DEPLOY_CHECK);
-    await expect(
-      t.service.completeManual(
-        created.data.id,
-        K.FE_DEPLOY_CHECK,
-        {
-          checklist: { investor: true, admin: true },
-          urls: {
-            investor: 'https://acme-capital.investor.loor.vc',
-            admin: 'https://acme-capital.admin.loor.vc',
-          },
-        },
-        OPERATOR,
-      ),
-    ).resolves.toMatchObject({
-      data: {
-        status: ProvisioningStatus.COMPLETED,
-        delivery: {
-          enabledEnvironments: ['INVESTOR', 'ADMIN'],
-          urls: {
-            investor: 'https://acme-capital.investor.loor.vc',
-            admin: 'https://acme-capital.admin.loor.vc',
-          },
-        },
+    expect(created.data.status).toBe(ProvisioningStatus.COMPLETED);
+    expect(created.data.delivery).toMatchObject({
+      enabledEnvironments: ['INVESTOR', 'ADMIN'],
+      urls: {
+        investor: 'https://acme-capital.investor.loor.vc',
+        admin: 'https://acme-capital.admin.loor.vc',
       },
     });
     const delivery = (
       await t.service.get(created.data.id)
     ).data.delivery as Row;
     expect(delivery.urls).not.toHaveProperty('entrepreneur');
-  });
-
-  it('completeManual cannot complete a gate that is not waiting', async () => {
-    const t = setup();
-    const created = await t.service.create(
-      baseDto({ skipDnsCheck: false }),
-      OPERATOR,
-    );
-    // DNS_CHECK is still PENDING (runner has not reached it)
-    await expect(
-      t.service.completeManual(
-        created.data.id,
-        K.DNS_CHECK,
-        { checklist: { resolves: true, https: true } },
-        OPERATOR,
-      ),
-    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('copies only stored + allowlisted settings cells from the template', async () => {

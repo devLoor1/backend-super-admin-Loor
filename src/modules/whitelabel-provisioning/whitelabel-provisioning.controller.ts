@@ -164,11 +164,11 @@ export class WhitelabelProvisioningController {
   @Roles(ROLES.SUPER_ADMIN)
   @ApiOperation({
     summary:
-      'Complete a manual gate (FE_DEPLOY_CHECK | DNS_CHECK) and continue the pipeline',
+      'Legacy manual-gate complete (unused while MANUAL_GATES is empty)',
     description:
-      'FE_DEPLOY_CHECK requires checklist { investor, entrepreneur, admin } all true plus https urls.{investor,entrepreneur,admin}; ' +
-      'DNS_CHECK requires { resolves, https } all true plus hosts.{investor|entrepreneur|admin}={url,status:ok,https:true}. ' +
-      'Nest does not call Netlify or DNS. Any other step key → 400.',
+      'Shared-frontend homolog completes FE_DEPLOY_CHECK / DNS_CHECK automatically ' +
+      '(DNS resolve + HTTPS + Core bootstrap slug match). This endpoint returns 400 ' +
+      'unless a step is re-listed in MANUAL_GATES. Prefer POST …/retry on failure.',
   })
   @ApiParam({ name: 'stepKey', enum: ProvisioningStepKey })
   @ApiOkResponse()

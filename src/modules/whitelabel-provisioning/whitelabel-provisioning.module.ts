@@ -7,6 +7,7 @@ import { PlatformConfigModule } from '../platform-config/platform-config.module'
 import { SmtpModule } from '../smtp/smtp.module';
 import { TermsModule } from '../terms/terms.module';
 import { WhitelabelModule } from '../whitelabel/whitelabel.module';
+import { FrontendReadinessService } from './frontend-readiness.service';
 import { ProvisioningRunnerService } from './provisioning-runner.service';
 import { ProvisioningSecretsStore } from './provisioning-secrets.store';
 import { ProvisioningStepsService } from './provisioning-steps.service';
@@ -36,6 +37,7 @@ import { WhitelabelProvisioningService } from './whitelabel-provisioning.service
     ProvisioningRunnerService,
     ProvisioningStepsService,
     ProvisioningSecretsStore,
+    FrontendReadinessService,
   ],
 })
 export class WhitelabelProvisioningModule {}

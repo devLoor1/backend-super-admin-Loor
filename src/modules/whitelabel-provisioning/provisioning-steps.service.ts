@@ -14,10 +14,16 @@ import { SmtpService } from '../smtp/smtp.service';
 import { TermsService } from '../terms/terms.service';
 import { WhitelabelService } from '../whitelabel/whitelabel.service';
 import {
+  FrontendReadinessService,
+  type ReadinessReport,
+} from './frontend-readiness.service';
+import {
   FRONTEND_ENVIRONMENTS,
   FRONTEND_TO_CAPABILITY,
   FrontendEnvironment,
+  FrontendUrlMode,
   normalizeEnabledEnvironments,
+  normalizeFrontendUrlMode,
   parseDnsHosts,
   parseFrontendUrls,
   suggestedFrontendUrls,
@@ -110,6 +116,7 @@ export class ProvisioningStepsService {
     private readonly terms: TermsService,
     private readonly platformAssets: PlatformAssetsService,
     private readonly secrets: ProvisioningSecretsStore,
+    private readonly frontendReadiness: FrontendReadinessService,
   ) {}
 
   async execute(ctx: StepContext): Promise<StepOutcome> {
@@ -128,16 +135,14 @@ export class ProvisioningStepsService {
         return this.configureSmtp(ctx);
       case ProvisioningStepKey.GATEWAY_CONFIG:
         return this.configureGateway(ctx);
+      case ProvisioningStepKey.FE_DEPLOY_CHECK:
+        return this.feDeployCheck(ctx);
+      case ProvisioningStepKey.DNS_CHECK:
+        return this.dnsCheck(ctx);
       case ProvisioningStepKey.VALIDATE:
         return this.validate(ctx);
       case ProvisioningStepKey.DELIVER:
         return this.deliver(ctx);
-      case ProvisioningStepKey.FE_DEPLOY_CHECK:
-      case ProvisioningStepKey.DNS_CHECK:
-        throw new ProvisioningStepError(
-          'E_MANUAL_STEP',
-          `${ctx.step.key} is a manual gate and can only be completed via the manual-complete endpoint`,
-        );
       default:
         throw new ProvisioningStepError(
           'E_UNKNOWN_STEP',
@@ -699,6 +704,181 @@ export class ProvisioningStepsService {
   }
 
   // ---------------------------------------------------------------------------
+  // FE_DEPLOY_CHECK / DNS_CHECK (shared frontend readiness)
+  // ---------------------------------------------------------------------------
+
+  private tenantPayloadOf(provisioning: ProvisioningWithSteps): {
+    enabledEnvironments?: unknown;
+    urlMode?: unknown;
+  } {
+    const tenant = provisioning.steps.find(
+      (s) => s.key === ProvisioningStepKey.CREATE_TENANT,
+    );
+    return (tenant?.payload ?? {}) as {
+      enabledEnvironments?: unknown;
+      urlMode?: unknown;
+    };
+  }
+
+  private enabledEnvironmentsFromProvisioning(
+    provisioning: ProvisioningWithSteps,
+  ): FrontendEnvironment[] {
+    return normalizeEnabledEnvironments(
+      this.tenantPayloadOf(provisioning).enabledEnvironments,
+    );
+  }
+
+  private urlModeFromProvisioning(
+    provisioning: ProvisioningWithSteps,
+  ): FrontendUrlMode {
+    return normalizeFrontendUrlMode(this.tenantPayloadOf(provisioning).urlMode);
+  }
+
+  private urlsFromReadiness(
+    report: ReadinessReport,
+  ): Record<string, { url: string; status: 'ok' | 'failed'; error: string | null }> {
+    const urls: Record<
+      string,
+      { url: string; status: 'ok' | 'failed'; error: string | null }
+    > = {};
+    for (const row of report.environments) {
+      urls[row.environment] = {
+        url: row.url,
+        status: row.status,
+        error: row.error,
+      };
+    }
+    return urls;
+  }
+
+  private hostsFromReadiness(
+    report: ReadinessReport,
+  ): Record<
+    string,
+    {
+      host: string;
+      url: string;
+      status: 'ok' | 'failed';
+      https: boolean;
+      resolves: boolean;
+      bootstrapOk: boolean;
+      bootstrapSlug: string | null;
+      error: string | null;
+    }
+  > {
+    const hosts: Record<
+      string,
+      {
+        host: string;
+        url: string;
+        status: 'ok' | 'failed';
+        https: boolean;
+        resolves: boolean;
+        bootstrapOk: boolean;
+        bootstrapSlug: string | null;
+        error: string | null;
+      }
+    > = {};
+    for (const row of report.environments) {
+      hosts[row.environment] = {
+        host: row.host,
+        url: row.url,
+        status: row.status,
+        https: row.httpsOk,
+        resolves: row.resolves,
+        bootstrapOk: row.bootstrapOk,
+        bootstrapSlug: row.bootstrapSlug,
+        error: row.error,
+      };
+    }
+    return hosts;
+  }
+
+  private assertReadinessOk(
+    report: ReadinessReport,
+    code: string,
+  ): void {
+    if (report.ok) return;
+    const failed = report.environments.filter((e) => e.status !== 'ok');
+    const detail = failed
+      .map((e) => `${e.environment}: ${e.error ?? 'failed'}`)
+      .join('; ');
+    throw new ProvisioningStepError(
+      code,
+      `Shared frontend readiness failed — ${detail}`,
+      {
+        mode: report.mode,
+        corePublicUrl: report.corePublicUrl,
+        enabledEnvironments: report.enabledEnvironments,
+        environments: report.environments,
+        urls: this.urlsFromReadiness(report),
+        hosts: this.hostsFromReadiness(report),
+      },
+    );
+  }
+
+  private async feDeployCheck({
+    provisioning,
+  }: StepContext): Promise<StepOutcome> {
+    const enabled = this.enabledEnvironmentsFromProvisioning(provisioning);
+    const urlMode = this.urlModeFromProvisioning(provisioning);
+    const report = await this.frontendReadiness.verifyProvisioning({
+      slug: provisioning.slug,
+      enabledEnvironments: enabled.map((e) => FRONTEND_TO_CAPABILITY[e]),
+      urlMode,
+    });
+    this.assertReadinessOk(report, 'E_FRONTEND_READINESS_FAILED');
+    return {
+      status: 'SUCCESS',
+      result: {
+        mode: report.mode,
+        urlMode: report.urlMode,
+        sharedFrontend: true,
+        corePublicUrl: report.corePublicUrl,
+        enabledEnvironments: report.enabledEnvironments,
+        environments: report.environments,
+        urls: this.urlsFromReadiness(report),
+      },
+    };
+  }
+
+  private async dnsCheck({
+    provisioning,
+  }: StepContext): Promise<StepOutcome> {
+    const urlMode = this.urlModeFromProvisioning(provisioning);
+    if (urlMode === 'PATH') {
+      return {
+        status: 'SKIPPED',
+        result: {
+          reason: 'not_required_path_mode',
+          urlMode,
+          note: 'PATH mode uses shared Netlify hosts; per-tenant DNS is not required.',
+        },
+      };
+    }
+    const enabled = this.enabledEnvironmentsFromProvisioning(provisioning);
+    const report = await this.frontendReadiness.verifyProvisioning({
+      slug: provisioning.slug,
+      enabledEnvironments: enabled.map((e) => FRONTEND_TO_CAPABILITY[e]),
+      urlMode,
+    });
+    this.assertReadinessOk(report, 'E_DNS_READINESS_FAILED');
+    return {
+      status: 'SUCCESS',
+      result: {
+        mode: report.mode,
+        urlMode: report.urlMode,
+        sharedFrontend: true,
+        corePublicUrl: report.corePublicUrl,
+        enabledEnvironments: report.enabledEnvironments,
+        environments: report.environments,
+        hosts: this.hostsFromReadiness(report),
+        urls: this.urlsFromReadiness(report),
+      },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // VALIDATE / DELIVER
   // ---------------------------------------------------------------------------
 
@@ -789,6 +969,12 @@ export class ProvisioningStepsService {
     return normalizeEnabledEnvironments(payload.enabledEnvironments);
   }
 
+  private urlModeOf(steps: ProvisioningStepRow[]): FrontendUrlMode {
+    const tenant = steps.find((s) => s.key === ProvisioningStepKey.CREATE_TENANT);
+    const payload = (tenant?.payload ?? {}) as { urlMode?: unknown };
+    return normalizeFrontendUrlMode(payload.urlMode);
+  }
+
   private resolveConfirmedFrontendUrls(
     steps: ProvisioningStepRow[],
   ): Partial<Record<FrontendEnvironment, string>> | null {
@@ -861,8 +1047,9 @@ export class ProvisioningStepsService {
         : null;
 
     const enabled = this.enabledEnvironmentsOf(current.steps);
+    const urlMode = this.urlModeOf(current.steps);
     const confirmed = this.resolveConfirmedFrontendUrls(current.steps);
-    const suggested = suggestedFrontendUrls(current.slug, enabled);
+    const suggested = suggestedFrontendUrls(current.slug, enabled, urlMode);
     const urls: Record<string, string | null> = { primary: current.baseUrl };
     for (const env of FRONTEND_ENVIRONMENTS) {
       if (!enabled.includes(env)) continue;
@@ -874,6 +1061,7 @@ export class ProvisioningStepsService {
       slug: current.slug,
       baseUrl: current.baseUrl,
       whitelabelId: current.whitelabelId,
+      urlMode,
       enabledEnvironments: enabled.map((e) => FRONTEND_TO_CAPABILITY[e]),
       admin: hasAdmin
         ? { email: adminPayload.email, name: adminPayload.name ?? null }
@@ -882,7 +1070,10 @@ export class ProvisioningStepsService {
       urls,
       suggestedUrls: {
         ...suggested,
-        note: 'Homolog convention only for contracted environments. Share delivery.urls after gates — not these suggestions.',
+        note:
+          urlMode === 'PATH'
+            ? 'PATH mode: shared Netlify /w/{slug}. delivery.urls come from readiness (HTTPS + bootstrap?slug=).'
+            : 'HOSTNAME mode: delivery.urls come from readiness (DNS + HTTPS + bootstrap).',
       },
       credentialsNote:
         'The temporary admin password is never stored; communicate it through a secure out-of-band channel.',

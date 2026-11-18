@@ -35,6 +35,7 @@ import {
   FRONTEND_TO_CAPABILITY,
   FrontendEnvironment,
   normalizeEnabledEnvironments,
+  normalizeFrontendUrlMode,
   parseDnsHosts,
   parseFrontendUrls,
   suggestedFrontendUrls,
@@ -119,12 +120,19 @@ export class WhitelabelProvisioningService {
       });
     }
 
+    const urlMode = normalizeFrontendUrlMode(dto.urlMode);
     const skipFe = dto.skipFeDeployCheck === true;
-    const skipDns = dto.skipDnsCheck === true;
+    // PATH mode has no per-tenant DNS — always skip DNS_CHECK.
+    const skipDns =
+      dto.skipDnsCheck === true || urlMode === 'PATH';
     const now = new Date();
 
     const brandingSecret = toBrandingSecret(dto.branding, mainAreaFile);
-    const plan = this.planSteps(dto, { skipFe, skipDns }, brandingSecret);
+    const plan = this.planSteps(
+      dto,
+      { skipFe, skipDns, urlMode },
+      brandingSecret,
+    );
 
     const created = await this.prisma.whitelabelProvisioning.create({
       data: {
@@ -358,7 +366,8 @@ export class WhitelabelProvisioningService {
     if (!isManualGate(stepKey)) {
       throw new BadRequestException({
         code: 'E_STEP_NOT_MANUAL',
-        message: `${stepKey} is not a manual step. Allowed: FE_DEPLOY_CHECK, DNS_CHECK`,
+        message:
+          `${stepKey} is not a manual step. FE_DEPLOY_CHECK and DNS_CHECK run automatically via shared-frontend readiness; use retry on failure.`,
       });
     }
 
@@ -539,7 +548,11 @@ export class WhitelabelProvisioningService {
   /** Decides per step: payload (non-secret) and optional skip reason. */
   private planSteps(
     dto: CreateProvisioningDto,
-    flags: { skipFe: boolean; skipDns: boolean },
+    flags: {
+      skipFe: boolean;
+      skipDns: boolean;
+      urlMode: 'HOSTNAME' | 'PATH';
+    },
     branding?: ProvisioningBrandingSecret,
   ): Record<
     ProvisioningStepKey,
@@ -552,6 +565,7 @@ export class WhitelabelProvisioningService {
       slug: dto.slug,
       baseUrl: dto.baseUrl.trim(),
       enabledEnvironments: enabledCapabilities,
+      urlMode: flags.urlMode,
     };
     return {
       [ProvisioningStepKey.CREATE_TENANT]: { payload: tenantPayload },
@@ -603,15 +617,18 @@ export class WhitelabelProvisioningService {
         ? { skipReason: 'skip_requested' }
         : {
             payload: {
-              manual: true,
+              urlMode: flags.urlMode,
               enabledEnvironments: enabledCapabilities,
             },
           },
       [ProvisioningStepKey.DNS_CHECK]: flags.skipDns
-        ? { skipReason: 'skip_requested' }
+        ? {
+            skipReason:
+              flags.urlMode === 'PATH' ? 'not_required_path_mode' : 'skip_requested',
+          }
         : {
             payload: {
-              manual: true,
+              urlMode: flags.urlMode,
               enabledEnvironments: enabledCapabilities,
             },
           },

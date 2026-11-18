@@ -12,7 +12,7 @@ Core effect goes through existing services (`WhitelabelService`, `AdministratorS
 | POST | `/whitelabel-provisionings` | SUPER_ADMIN | 201. Runs synchronously until first pause. 409 if same slug is PENDING/RUNNING/WAITING_MANUAL_ACTION |
 | GET | `/whitelabel-provisionings/:id` | SA, SUPPORT, READ_ONLY | progress + steps (no secrets) + delivery |
 | POST | `/whitelabel-provisionings/:id/retry` | SUPER_ADMIN | body `{ stepKey?, smtp?, initialAdmin?, gateway?, branding? }` (or multipart `payload` + `mainAreaImage`) |
-| POST | `/whitelabel-provisionings/:id/steps/:stepKey/complete` | SUPER_ADMIN | only `FE_DEPLOY_CHECK` / `DNS_CHECK` |
+| POST | `/whitelabel-provisionings/:id/steps/:stepKey/complete` | SUPER_ADMIN | legacy; returns 400 while `MANUAL_GATES` is empty |
 | GET | `/whitelabels/:whitelabelId/provisioning` | SA, SUPPORT, READ_ONLY | latest provisioning for a Core WL id |
 
 ## Pipeline (`STEP_ORDER`)
@@ -42,22 +42,18 @@ Stored on `CREATE_TENANT` / gate step payloads. `FE_DEPLOY_CHECK` / `DNS_CHECK` 
   (case-insensitive) slug client-side (paginated, max 20 pages).
 - `APPLY_SETTINGS_TEMPLATE` copies only **stored** provenance cells in `SETTINGS_COPY_ALLOWLIST`; `main_area_image`
   and any cell with secret-like keys are never copied.
-- `FE_DEPLOY_CHECK` / `DNS_CHECK` park the provisioning in `WAITING_MANUAL_ACTION` until completed with a full checklist
-  **and** attested https origins. Nest does **not** call Netlify or DNS.
-  - `FE_DEPLOY_CHECK` body: `checklist { investor, entrepreneur, admin }` all `true` +
-    `urls { investor, entrepreneur, admin }` (https origins). Step result stores
-    `urls.{env} = { url, status: 'ok' }`.
-  - `DNS_CHECK` body: `checklist { resolves, https }` all `true` +
-    `hosts.{investor|entrepreneur|admin} = { url, status: 'ok', https: true }`.
-    Step result stores `hosts.{env} = { host, url, status, https }`.
+- `FE_DEPLOY_CHECK` / `DNS_CHECK` run **automatically** via `FrontendReadinessService` (shared FE):
+  public DNS resolve + HTTPS GET of `{slug}.(investor|empresa|admin).loor.vc` (+ legacy aliases) +
+  Core `GET /public/platform/bootstrap` with `Origin` of that URL; slug must match the provisioning.
+  Nest does **not** call Netlify or Hostinger APIs. Failure codes:
+  `E_FRONTEND_READINESS_FAILED` / `E_DNS_READINESS_FAILED`. Retry re-runs only the check.
+  Step result includes `mode: shared_frontend`, `environments[]`, `urls` / `hosts`.
 - `DELIVER` fills `delivery` (no password).
-  - `delivery.urls = { primary: baseUrl, investor, entrepreneur, admin }` uses **only** URLs
-    attested on `FE_DEPLOY_CHECK` (fallback: `DNS_CHECK`). When both gates were skipped, the three
-    app URLs are `null` — never invented from convention.
+  - `delivery.urls` for contracted environments come **only** from successful readiness
+    (`FE_DEPLOY_CHECK`, fallback `DNS_CHECK`). Skipped gates → those URLs stay `null`.
   - `delivery.suggestedUrls` follow the homolog naming **convention**
     `https://{slug}.investor.loor.vc` / `https://{slug}.empresa.loor.vc` /
-    `https://{slug}.admin.loor.vc` — not verified, not guaranteed. See
-    `docs/whitelabel-fe-homolog-runbook-v1.md`.
+    `https://{slug}.admin.loor.vc`. See `docs/whitelabel-shared-fe-homolog-runbook-v2.md`.
 
 ## Secrets are ephemeral
 
