@@ -8,6 +8,7 @@ import { PlatformAssetsService } from './platform-assets.service';
   imports: [AuditModule],
   controllers: [PlatformAssetsController, LogoOptionsController],
   providers: [PlatformAssetsService],
+  exports: [PlatformAssetsService],
 })
 export class PlatformAssetsModule {}
 

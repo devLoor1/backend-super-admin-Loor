@@ -153,6 +153,17 @@ function createFakePrisma() {
 const OPERATOR = { operatorId: 'op-1', correlationId: 'corr-1' };
 const ADMIN_PASSWORD = 'S3cr3t-Admin-Pass!';
 const SMTP_PASSWORD = 'smtp-pass-9999';
+const ASSET_REF = '3f6c1c52-8a1e-4d0e-9f4b-0a5d2f3a9b11';
+const IMAGE_BYTES = Buffer.from('FAKE-PNG-BYTES-0123456789');
+
+function brandFile() {
+  return {
+    buffer: IMAGE_BYTES,
+    mimetype: 'image/png',
+    originalname: 'brand.png',
+    size: IMAGE_BYTES.length,
+  };
+}
 
 function baseDto(
   overrides: Partial<CreateProvisioningDto> = {},
@@ -164,6 +175,38 @@ function baseDto(
     skipDnsCheck: true,
     ...overrides,
   } as CreateProvisioningDto;
+}
+
+function feUrls(slug = 'acme-capital') {
+  return {
+    investor: `https://${slug}.investor.loor.vc`,
+    entrepreneur: `https://${slug}.empresa.loor.vc`,
+    admin: `https://${slug}.admin.loor.vc`,
+  };
+}
+
+function feComplete(note?: string) {
+  return {
+    checklist: { investor: true, entrepreneur: true, admin: true },
+    urls: feUrls(),
+    ...(note ? { note } : {}),
+  };
+}
+
+function dnsComplete() {
+  const urls = feUrls();
+  return {
+    checklist: { resolves: true, https: true },
+    hosts: {
+      investor: { url: urls.investor, status: 'ok' as const, https: true },
+      entrepreneur: {
+        url: urls.entrepreneur,
+        status: 'ok' as const,
+        https: true,
+      },
+      admin: { url: urls.admin, status: 'ok' as const, https: true },
+    },
+  };
 }
 
 function setup() {
@@ -206,6 +249,14 @@ function setup() {
       data: { revision_id: 3 },
     })),
   };
+  const platformAssets = {
+    upload: jest.fn(async (..._args: unknown[]): Promise<Row> => ({
+      data: { asset_ref: ASSET_REF },
+    })),
+    replace: jest.fn(async (..._args: unknown[]): Promise<Row> => ({
+      data: { asset_ref: ASSET_REF },
+    })),
+  };
   const audit = {
     write: jest.fn(async (..._args: unknown[]): Promise<Row> => ({})),
   };
@@ -219,6 +270,7 @@ function setup() {
     smtp as never,
     gateways as never,
     terms as never,
+    platformAssets as never,
     secrets,
   );
   const runner = new ProvisioningRunnerService(
@@ -241,6 +293,7 @@ function setup() {
     smtp,
     gateways,
     terms,
+    platformAssets,
     audit,
     secrets,
     service,
@@ -299,10 +352,7 @@ describe('WhitelabelProvisioningService (MVP)', () => {
     const done = await t.service.completeManual(
       created.data.id,
       K.FE_DEPLOY_CHECK,
-      {
-        checklist: { investor: true, entrepreneur: true, admin: true },
-        note: 'ok',
-      },
+      feComplete('ok'),
       OPERATOR,
     );
 
@@ -319,10 +369,23 @@ describe('WhitelabelProvisioningService (MVP)', () => {
       slug: 'acme-capital',
       whitelabelId: 42,
       admin: { email: 'ana@acme.example', name: 'Ana' },
-      urls: { primary: 'https://acme-capital.wallet.loor.vc' },
-      suggestedUrls: {
+      urls: {
+        primary: 'https://acme-capital.wallet.loor.vc',
+        investor: 'https://acme-capital.investor.loor.vc',
         entrepreneur: 'https://acme-capital.empresa.loor.vc',
         admin: 'https://acme-capital.admin.loor.vc',
+      },
+      suggestedUrls: {
+        investor: 'https://acme-capital.investor.loor.vc',
+        entrepreneur: 'https://acme-capital.empresa.loor.vc',
+        admin: 'https://acme-capital.admin.loor.vc',
+      },
+    });
+    expect(
+      done.data.steps.find((s) => s.key === K.FE_DEPLOY_CHECK)?.result,
+    ).toMatchObject({
+      urls: {
+        investor: { url: 'https://acme-capital.investor.loor.vc', status: 'ok' },
       },
     });
     expect(t.secrets.has(created.data.id)).toBe(false);
@@ -339,19 +402,44 @@ describe('WhitelabelProvisioningService (MVP)', () => {
     const afterFe = await t.service.completeManual(
       created.data.id,
       K.FE_DEPLOY_CHECK,
-      { checklist: { investor: true, entrepreneur: true, admin: true } },
+      feComplete(),
       OPERATOR,
     );
     expect(afterFe.data.status).toBe(ProvisioningStatus.WAITING_MANUAL_ACTION);
     expect(afterFe.data.currentStep).toBe(K.DNS_CHECK);
+    expect(
+      afterFe.data.steps.find((s) => s.key === K.FE_DEPLOY_CHECK)?.result,
+    ).toMatchObject({
+      urls: {
+        investor: { url: 'https://acme-capital.investor.loor.vc', status: 'ok' },
+      },
+    });
 
     const afterDns = await t.service.completeManual(
       created.data.id,
       K.DNS_CHECK,
-      { checklist: { resolves: true, https: true } },
+      dnsComplete(),
       OPERATOR,
     );
     expect(afterDns.data.status).toBe(ProvisioningStatus.COMPLETED);
+    expect(
+      afterDns.data.steps.find((s) => s.key === K.DNS_CHECK)?.result,
+    ).toMatchObject({
+      hosts: {
+        investor: {
+          host: 'acme-capital.investor.loor.vc',
+          status: 'ok',
+          https: true,
+        },
+      },
+    });
+    expect(afterDns.data.delivery).toMatchObject({
+      urls: {
+        investor: 'https://acme-capital.investor.loor.vc',
+        entrepreneur: 'https://acme-capital.empresa.loor.vc',
+        admin: 'https://acme-capital.admin.loor.vc',
+      },
+    });
   });
 
   it('completes without pausing when both manual checks are skipped', async () => {
@@ -587,7 +675,10 @@ describe('WhitelabelProvisioningService (MVP)', () => {
       t.service.completeManual(
         created.data.id,
         K.FE_DEPLOY_CHECK,
-        { checklist: { investor: true, entrepreneur: true, admin: false } },
+        {
+          checklist: { investor: true, entrepreneur: true, admin: false },
+          urls: feUrls(),
+        },
         OPERATOR,
       ),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
@@ -596,12 +687,132 @@ describe('WhitelabelProvisioningService (MVP)', () => {
       t.service.completeManual(
         created.data.id,
         K.FE_DEPLOY_CHECK,
-        { checklist: { resolves: true, https: true } },
+        { checklist: { resolves: true, https: true }, urls: feUrls() },
         OPERATOR,
       ),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
     const still = await t.service.get(created.data.id);
     expect(still.data.status).toBe(ProvisioningStatus.WAITING_MANUAL_ACTION);
+  });
+
+  it('completeManual rejects FE_DEPLOY_CHECK without https urls', async () => {
+    const t = setup();
+    const created = await t.service.create(baseDto(), OPERATOR);
+    await expect(
+      t.service.completeManual(
+        created.data.id,
+        K.FE_DEPLOY_CHECK,
+        { checklist: { investor: true, entrepreneur: true, admin: true } },
+        OPERATOR,
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'E_FRONTEND_URLS_REQUIRED' }),
+    });
+    await expect(
+      t.service.completeManual(
+        created.data.id,
+        K.FE_DEPLOY_CHECK,
+        {
+          checklist: { investor: true, entrepreneur: true, admin: true },
+          urls: {
+            investor: 'http://insecure.example',
+            entrepreneur: feUrls().entrepreneur,
+            admin: feUrls().admin,
+          },
+        },
+        OPERATOR,
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'E_FRONTEND_URLS_REQUIRED' }),
+    });
+  });
+
+  it('completeManual rejects DNS_CHECK without hosts attestation', async () => {
+    const t = setup();
+    const created = await t.service.create(
+      baseDto({ skipDnsCheck: false }),
+      OPERATOR,
+    );
+    await t.service.completeManual(
+      created.data.id,
+      K.FE_DEPLOY_CHECK,
+      feComplete(),
+      OPERATOR,
+    );
+    await expect(
+      t.service.completeManual(
+        created.data.id,
+        K.DNS_CHECK,
+        { checklist: { resolves: true, https: true } },
+        OPERATOR,
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'E_DNS_HOSTS_REQUIRED' }),
+    });
+  });
+
+  it('DELIVER keeps urls null when FE/DNS gates were skipped', async () => {
+    const t = setup();
+    const done = await t.service.create(
+      baseDto({ skipFeDeployCheck: true, skipDnsCheck: true }),
+      OPERATOR,
+    );
+    expect(done.data.status).toBe(ProvisioningStatus.COMPLETED);
+    expect(done.data.delivery).toMatchObject({
+      enabledEnvironments: ['INVESTOR', 'ENTREPRENEUR', 'ADMIN'],
+      urls: {
+        primary: 'https://acme-capital.wallet.loor.vc',
+        investor: null,
+        entrepreneur: null,
+        admin: null,
+      },
+      suggestedUrls: {
+        investor: 'https://acme-capital.investor.loor.vc',
+        entrepreneur: 'https://acme-capital.empresa.loor.vc',
+        admin: 'https://acme-capital.admin.loor.vc',
+      },
+    });
+  });
+
+  it('Finapop-style: only INVESTOR+ADMIN required on FE gate; entrepreneur omitted from delivery', async () => {
+    const t = setup();
+    const created = await t.service.create(
+      baseDto({
+        enabledEnvironments: ['INVESTOR', 'ADMIN'],
+        skipDnsCheck: true,
+      }),
+      OPERATOR,
+    );
+    expect(created.data.currentStep).toBe(K.FE_DEPLOY_CHECK);
+    await expect(
+      t.service.completeManual(
+        created.data.id,
+        K.FE_DEPLOY_CHECK,
+        {
+          checklist: { investor: true, admin: true },
+          urls: {
+            investor: 'https://acme-capital.investor.loor.vc',
+            admin: 'https://acme-capital.admin.loor.vc',
+          },
+        },
+        OPERATOR,
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        status: ProvisioningStatus.COMPLETED,
+        delivery: {
+          enabledEnvironments: ['INVESTOR', 'ADMIN'],
+          urls: {
+            investor: 'https://acme-capital.investor.loor.vc',
+            admin: 'https://acme-capital.admin.loor.vc',
+          },
+        },
+      },
+    });
+    const delivery = (
+      await t.service.get(created.data.id)
+    ).data.delivery as Row;
+    expect(delivery.urls).not.toHaveProperty('entrepreneur');
   });
 
   it('completeManual cannot complete a gate that is not waiting', async () => {
@@ -852,6 +1063,345 @@ describe('WhitelabelProvisioningService (MVP)', () => {
       OPERATOR,
     );
     expect(res.data.status).toBe(ProvisioningStatus.COMPLETED);
+  });
+});
+
+describe('UPLOAD_BRAND', () => {
+  const stepRes = (
+    res: { data: { steps: Array<{ key: K }> } },
+    key: K,
+  ): Row | undefined =>
+    res.data.steps.find((s) => s.key === key) as Row | undefined;
+
+  it('no branding → SKIPPED with reason no_branding and nothing is called', async () => {
+    const t = setup();
+    const res = await t.service.create(
+      baseDto({ skipFeDeployCheck: true }),
+      OPERATOR,
+    );
+    expect(statusOf(res, K.UPLOAD_BRAND)).toBe(S.SKIPPED);
+    expect(stepRes(res, K.UPLOAD_BRAND)?.result).toEqual({
+      reason: 'no_branding',
+    });
+    expect(t.platformAssets.upload).not.toHaveBeenCalled();
+    expect(t.platformConfig.update).not.toHaveBeenCalled();
+  });
+
+  it('email-only branding → SUCCESS via platformConfig.update(email_branding) and secrets discarded', async () => {
+    const t = setup();
+    const res = await t.service.create(
+      baseDto({
+        skipFeDeployCheck: true,
+        branding: {
+          email: {
+            primary_color: '#112233',
+            logo_url: 'https://cdn.acme.example/logo.png',
+          },
+        },
+      }),
+      OPERATOR,
+    );
+
+    expect(res.data.status).toBe(ProvisioningStatus.COMPLETED);
+    expect(statusOf(res, K.UPLOAD_BRAND)).toBe(S.SUCCESS);
+    expect(t.platformConfig.update).toHaveBeenCalledTimes(1);
+    expect(t.platformConfig.update).toHaveBeenCalledWith(
+      '42',
+      {
+        page: 'email_branding',
+        key: 'config',
+        value: {
+          primary_color: '#112233',
+          logo_url: 'https://cdn.acme.example/logo.png',
+        },
+      },
+      expect.anything(),
+    );
+    expect(t.platformAssets.upload).not.toHaveBeenCalled();
+    const step = stepRes(res, K.UPLOAD_BRAND)!;
+    expect(step.payload).toEqual({
+      hasEmail: true,
+      hasLoginColor: false,
+      hasMainAreaFile: false,
+      mainAreaPages: [],
+    });
+    expect(step.result).toEqual({
+      emailApplied: true,
+      loginColorApplied: false,
+    });
+    expect(res.data.delivery).toMatchObject({ branding: { email: true } });
+    expect(t.secrets.has(res.data.id)).toBe(false);
+  });
+
+  it('merges only provided email keys and allows explicit null to clear', async () => {
+    const t = setup();
+    await t.service.create(
+      baseDto({
+        skipFeDeployCheck: true,
+        branding: { email: { logo_url: null } },
+      }),
+      OPERATOR,
+    );
+    expect(t.platformConfig.update).toHaveBeenCalledWith(
+      '42',
+      { page: 'email_branding', key: 'config', value: { logo_url: null } },
+      expect.anything(),
+    );
+  });
+
+  it('login color + main_area file: uploads once (slot main_area) and associates the default page', async () => {
+    const t = setup();
+    const res = await t.service.create(
+      baseDto({
+        skipFeDeployCheck: true,
+        branding: { loginBrandPanelTextColor: '#ffffff' },
+      }),
+      OPERATOR,
+      brandFile(),
+    );
+
+    expect(res.data.status).toBe(ProvisioningStatus.COMPLETED);
+    expect(t.platformAssets.upload).toHaveBeenCalledTimes(1);
+    const [wl, file, slot] = t.platformAssets.upload.mock.calls[0] as [
+      string,
+      Row,
+      string,
+    ];
+    expect(wl).toBe('42');
+    expect(slot).toBe('main_area');
+    expect(file).toMatchObject({
+      mimetype: 'image/png',
+      originalname: 'brand.png',
+      size: IMAGE_BYTES.length,
+    });
+    expect(file.buffer).toBe(IMAGE_BYTES);
+    expect(t.platformAssets.replace).not.toHaveBeenCalled();
+
+    const puts = t.platformConfig.update.mock.calls.map((c: unknown[]) => c[1]);
+    expect(puts).toEqual([
+      { page: 'login', key: 'brand_panel_text_color', value: '#ffffff' },
+      {
+        page: 'login',
+        key: 'main_area_image',
+        value: {
+          capabilityId: 'platform.main_area_image',
+          version: 1,
+          enabled: true,
+          assetRef: ASSET_REF,
+        },
+      },
+    ]);
+    expect(stepRes(res, K.UPLOAD_BRAND)?.result).toEqual({
+      emailApplied: false,
+      loginColorApplied: true,
+      mainArea: { assetRef: ASSET_REF, pages: ['login'] },
+    });
+    expect(res.data.delivery).toMatchObject({
+      branding: { email: false, mainAreaAssetRef: ASSET_REF },
+    });
+  });
+
+  it('associates every requested page', async () => {
+    const t = setup();
+    await t.service.create(
+      baseDto({
+        skipFeDeployCheck: true,
+        branding: {
+          mainArea: { pages: ['login', 'register', 'quick_profile'] },
+        },
+      }),
+      OPERATOR,
+      brandFile(),
+    );
+    const pages = t.platformConfig.update.mock.calls
+      .map((c: unknown[]) => c[1] as Row)
+      .filter((b) => b.key === 'main_area_image')
+      .map((b) => b.page as string);
+    expect(pages).toEqual(['login', 'register', 'quick_profile']);
+    expect(t.platformAssets.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it('retry after a failed association uses replace on the same assetRef (upload never twice)', async () => {
+    const t = setup();
+    // email OK, then the main_area_image association fails once
+    t.platformConfig.update
+      .mockResolvedValueOnce({}) // email_branding
+      .mockRejectedValueOnce(
+        new LoorCoreException({
+          message: 'Core API unavailable',
+          status: 502,
+          code: 'CORE_UNAVAILABLE',
+        }),
+      );
+
+    const failed = await t.service.create(
+      baseDto({
+        skipFeDeployCheck: true,
+        branding: { email: { primary_color: '#abcdef' } },
+      }),
+      OPERATOR,
+      brandFile(),
+    );
+    expect(failed.data.status).toBe(ProvisioningStatus.FAILED);
+    expect(failed.data.currentStep).toBe(K.UPLOAD_BRAND);
+    expect(failed.data.errorCode).toBe('CORE_UNAVAILABLE');
+    expect(statusOf(failed, K.UPLOAD_BRAND)).toBe(S.FAILED);
+    // assetRef persisted for the idempotent retry, bytes never
+    expect(stepRes(failed, K.UPLOAD_BRAND)?.result).toMatchObject({
+      emailApplied: true,
+      assetRef: ASSET_REF,
+      pagesApplied: [],
+    });
+    expect(t.platformAssets.upload).toHaveBeenCalledTimes(1);
+
+    const retried = await t.service.retry(failed.data.id, {}, OPERATOR);
+
+    expect(retried.data.status).toBe(ProvisioningStatus.COMPLETED);
+    expect(t.platformAssets.upload).toHaveBeenCalledTimes(1);
+    expect(t.platformAssets.replace).toHaveBeenCalledTimes(1);
+    expect(t.platformAssets.replace.mock.calls[0][0]).toBe('42');
+    expect(t.platformAssets.replace.mock.calls[0][1]).toBe(ASSET_REF);
+    // email was already applied → not re-sent
+    const emailPuts = t.platformConfig.update.mock.calls.filter(
+      (c: unknown[]) => (c[1] as Row).page === 'email_branding',
+    );
+    expect(emailPuts).toHaveLength(1);
+    expect(stepRes(retried, K.UPLOAD_BRAND)?.result).toEqual({
+      emailApplied: true,
+      loginColorApplied: false,
+      mainArea: { assetRef: ASSET_REF, pages: ['login'] },
+    });
+    expect(stepRes(retried, K.UPLOAD_BRAND)?.attempts).toBe(2);
+    expect(t.secrets.has(failed.data.id)).toBe(false);
+  });
+
+  it('Core failure → UPLOAD_BRAND FAILED, earlier steps stay SUCCESS/SKIPPED, later steps stay PENDING', async () => {
+    const t = setup();
+    t.platformConfig.update.mockRejectedValueOnce(
+      new LoorCoreException({
+        message: 'bad branding',
+        status: 422,
+        code: 'E_VALIDATION',
+      }),
+    );
+    const res = await t.service.create(
+      baseDto({
+        skipFeDeployCheck: true,
+        initialAdmin: {
+          email: 'ana@acme.example',
+          temporaryPassword: ADMIN_PASSWORD,
+        },
+        branding: { email: { primary_color: '#000000' } },
+      }),
+      OPERATOR,
+    );
+    expect(res.data.status).toBe(ProvisioningStatus.FAILED);
+    expect(res.data.errorCode).toBe('E_VALIDATION');
+    expect(statusOf(res, K.CREATE_TENANT)).toBe(S.SUCCESS);
+    expect(statusOf(res, K.APPLY_SETTINGS_TEMPLATE)).toBe(S.SKIPPED);
+    expect(statusOf(res, K.UPLOAD_BRAND)).toBe(S.FAILED);
+    expect(statusOf(res, K.INITIAL_ADMIN)).toBe(S.PENDING);
+    expect(t.administrators.create).not.toHaveBeenCalled();
+    expect(t.whitelabels.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed upload (no assetRef yet) retries with upload, not replace', async () => {
+    const t = setup();
+    t.platformAssets.upload.mockRejectedValueOnce(
+      new LoorCoreException({
+        message: 'upstream down',
+        status: 502,
+        code: 'CORE_UNAVAILABLE',
+      }),
+    );
+    const failed = await t.service.create(
+      baseDto({ skipFeDeployCheck: true }),
+      OPERATOR,
+      brandFile(),
+    );
+    expect(statusOf(failed, K.UPLOAD_BRAND)).toBe(S.FAILED);
+    const done = await t.service.retry(failed.data.id, {}, OPERATOR);
+    expect(done.data.status).toBe(ProvisioningStatus.COMPLETED);
+    expect(t.platformAssets.upload).toHaveBeenCalledTimes(2);
+    expect(t.platformAssets.replace).not.toHaveBeenCalled();
+  });
+
+  it('after a restart the file is gone → E_SECRETS_REQUIRED until branding is re-supplied on retry', async () => {
+    const t = setup();
+    t.platformAssets.upload.mockRejectedValueOnce(
+      new LoorCoreException({
+        message: 'down',
+        status: 502,
+        code: 'CORE_UNAVAILABLE',
+      }),
+    );
+    const failed = await t.service.create(
+      baseDto({ skipFeDeployCheck: true }),
+      OPERATOR,
+      brandFile(),
+    );
+    t.secrets.clear(failed.data.id); // simulated restart
+
+    const still = await t.service.retry(failed.data.id, {}, OPERATOR);
+    expect(still.data.status).toBe(ProvisioningStatus.FAILED);
+    expect(still.data.errorCode).toBe('E_SECRETS_REQUIRED');
+    expect(t.platformAssets.upload).toHaveBeenCalledTimes(1);
+
+    const done = await t.service.retry(
+      failed.data.id,
+      { branding: { mainArea: { pages: ['register'] } } },
+      OPERATOR,
+      brandFile(),
+    );
+    expect(done.data.status).toBe(ProvisioningStatus.COMPLETED);
+    expect(t.platformAssets.upload).toHaveBeenCalledTimes(2);
+    expect((stepRes(done, K.UPLOAD_BRAND)?.result as Row).mainArea).toEqual({
+      assetRef: ASSET_REF,
+      pages: ['register'],
+    });
+  });
+
+  it('payload / result / responses / audit / DB never contain bytes, base64 or passwords', async () => {
+    const t = setup();
+    const res = await t.service.create(
+      baseDto({
+        skipFeDeployCheck: true,
+        initialAdmin: {
+          email: 'ana@acme.example',
+          temporaryPassword: ADMIN_PASSWORD,
+        },
+        branding: {
+          email: {
+            primary_color: '#123456',
+            logo_url: 'https://cdn.acme.example/logo.png',
+          },
+          loginBrandPanelTextColor: '#fafafa',
+        },
+      }),
+      OPERATOR,
+      brandFile(),
+    );
+    expect(res.data.status).toBe(ProvisioningStatus.COMPLETED);
+
+    const surfaces = JSON.stringify([
+      res,
+      t.steps.map((s) => ({ payload: s.payload, result: s.result })),
+      t.provisionings,
+      t.audit.write.mock.calls,
+    ]);
+    expect(surfaces).not.toContain(IMAGE_BYTES.toString('utf8'));
+    expect(surfaces).not.toContain(IMAGE_BYTES.toString('base64'));
+    expect(surfaces).not.toContain(ADMIN_PASSWORD);
+    expect(surfaces).not.toContain('"type":"Buffer"');
+    // the step payload carries flags only — no urls
+    const payload = stepRes(res, K.UPLOAD_BRAND)?.payload as Row;
+    expect(Object.keys(payload).sort()).toEqual([
+      'hasEmail',
+      'hasLoginColor',
+      'hasMainAreaFile',
+      'mainAreaPages',
+    ]);
+    expect(JSON.stringify(payload)).not.toContain('cdn.acme.example');
   });
 });
 

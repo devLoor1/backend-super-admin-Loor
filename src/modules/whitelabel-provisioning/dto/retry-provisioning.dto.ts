@@ -4,6 +4,7 @@ import { IsEnum, IsObject, IsOptional, ValidateNested } from 'class-validator';
 import { ProvisioningStepKey } from '@prisma/client';
 import {
   InitialAdminDto,
+  ProvisioningBrandingDto,
   ProvisioningGatewayDto,
 } from './create-provisioning.dto';
 
@@ -37,4 +38,15 @@ export class RetryProvisioningDto {
   @ValidateNested()
   @Type(() => ProvisioningGatewayDto)
   gateway?: ProvisioningGatewayDto;
+
+  @ApiPropertyOptional({
+    type: ProvisioningBrandingDto,
+    description:
+      'Re-supply branding (email / login color / main_area pages) after a restart. ' +
+      'The image is re-sent as multipart field `mainAreaImage` (payload = this DTO as JSON).',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ProvisioningBrandingDto)
+  branding?: ProvisioningBrandingDto;
 }

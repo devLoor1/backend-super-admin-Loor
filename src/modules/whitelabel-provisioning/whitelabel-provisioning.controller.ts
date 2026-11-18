@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -8,9 +9,14 @@ import {
   ParseEnumPipe,
   Post,
   Req,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import {
   ApiBearerAuth,
+  ApiConsumes,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiNotFoundResponse,
@@ -29,9 +35,41 @@ import { AuthenticatedOperator } from '../../common/interfaces/authenticated-ope
 import { CompleteManualStepDto } from './dto/complete-manual-step.dto';
 import { CreateProvisioningDto } from './dto/create-provisioning.dto';
 import { RetryProvisioningDto } from './dto/retry-provisioning.dto';
+import { ProvisioningPayloadPipe } from './provisioning-payload.pipe';
+import { ProvisioningBrandingFile } from './provisioning-secrets.store';
 import { WhitelabelProvisioningService } from './whitelabel-provisioning.service';
 
 type Req_ = Request & { correlationId?: string };
+
+const BRAND_IMAGE_FIELD = 'mainAreaImage';
+const BRAND_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+const BRAND_IMAGE_MIMES = ['image/jpeg', 'image/jpg', 'image/png'];
+
+/** Optional multipart file (JSON requests pass through untouched). Memory only, like platform-assets. */
+function brandImageInterceptor() {
+  return FileInterceptor(BRAND_IMAGE_FIELD, {
+    storage: memoryStorage(),
+    limits: { fileSize: BRAND_IMAGE_MAX_BYTES },
+  });
+}
+
+function toBrandingFile(
+  file: Express.Multer.File | undefined,
+): ProvisioningBrandingFile | undefined {
+  if (!file) return undefined;
+  if (!file.buffer?.length || !BRAND_IMAGE_MIMES.includes(file.mimetype)) {
+    throw new BadRequestException({
+      code: 'E_VALIDATION',
+      message: `${BRAND_IMAGE_FIELD} must be a non-empty jpg/png/jpeg image (≤20MiB)`,
+    });
+  }
+  return {
+    buffer: file.buffer,
+    mimetype: file.mimetype,
+    originalname: file.originalname,
+    size: file.size,
+  };
+}
 
 function metaOf(user: AuthenticatedOperator, req: Req_) {
   return {
@@ -62,12 +100,20 @@ export class WhitelabelProvisioningController {
     description: 'Provisioning with progress after the first run pause',
   })
   @ApiConflictResponse({ description: 'E_PROVISIONING_IN_PROGRESS' })
+  @ApiConsumes('application/json', 'multipart/form-data')
+  @UseInterceptors(brandImageInterceptor())
   create(
-    @Body() dto: CreateProvisioningDto,
+    // Typed `unknown` so the global ValidationPipe skips it; ProvisioningPayloadPipe validates.
+    @Body(new ProvisioningPayloadPipe(CreateProvisioningDto)) body: unknown,
+    @UploadedFile() file: Express.Multer.File | undefined,
     @CurrentUser() user: AuthenticatedOperator,
     @Req() req: Req_,
   ) {
-    return this.service.create(dto, metaOf(user, req));
+    return this.service.create(
+      body as CreateProvisioningDto,
+      metaOf(user, req),
+      toBrandingFile(file),
+    );
   }
 
   @Get(':id')
@@ -96,13 +142,21 @@ export class WhitelabelProvisioningController {
     description:
       'E_PROVISIONING_NOT_FAILED / E_NO_FAILED_STEP / E_STEP_NOT_RETRYABLE',
   })
+  @ApiConsumes('application/json', 'multipart/form-data')
+  @UseInterceptors(brandImageInterceptor())
   retry(
     @Param('id') id: string,
-    @Body() dto: RetryProvisioningDto,
+    @Body(new ProvisioningPayloadPipe(RetryProvisioningDto)) body: unknown,
+    @UploadedFile() file: Express.Multer.File | undefined,
     @CurrentUser() user: AuthenticatedOperator,
     @Req() req: Req_,
   ) {
-    return this.service.retry(id, dto, metaOf(user, req));
+    return this.service.retry(
+      id,
+      body as RetryProvisioningDto,
+      metaOf(user, req),
+      toBrandingFile(file),
+    );
   }
 
   @Post(':id/steps/:stepKey/complete')
@@ -112,8 +166,9 @@ export class WhitelabelProvisioningController {
     summary:
       'Complete a manual gate (FE_DEPLOY_CHECK | DNS_CHECK) and continue the pipeline',
     description:
-      'FE_DEPLOY_CHECK requires checklist { investor, entrepreneur, admin } all true; ' +
-      'DNS_CHECK requires { resolves, https } all true. Any other step key → 400.',
+      'FE_DEPLOY_CHECK requires checklist { investor, entrepreneur, admin } all true plus https urls.{investor,entrepreneur,admin}; ' +
+      'DNS_CHECK requires { resolves, https } all true plus hosts.{investor|entrepreneur|admin}={url,status:ok,https:true}. ' +
+      'Nest does not call Netlify or DNS. Any other step key → 400.',
   })
   @ApiParam({ name: 'stepKey', enum: ProvisioningStepKey })
   @ApiOkResponse()

@@ -8,11 +8,25 @@ import { PrismaService } from '../../database/prisma/prisma.service';
 import { LoorCoreException } from '../../integrations/loor-core/loor-core.exception';
 import { AdministratorService } from '../administrator/administrator.service';
 import { GatewayService } from '../gateway/gateway.service';
+import { PlatformAssetsService } from '../platform-assets/platform-assets.service';
 import { PlatformConfigService } from '../platform-config/platform-config.service';
 import { SmtpService } from '../smtp/smtp.service';
 import { TermsService } from '../terms/terms.service';
 import { WhitelabelService } from '../whitelabel/whitelabel.service';
-import { ProvisioningSecretsStore } from './provisioning-secrets.store';
+import {
+  FRONTEND_ENVIRONMENTS,
+  FRONTEND_TO_CAPABILITY,
+  FrontendEnvironment,
+  normalizeEnabledEnvironments,
+  parseDnsHosts,
+  parseFrontendUrls,
+  suggestedFrontendUrls,
+  urlsFromDnsHosts,
+} from './frontend-urls';
+import {
+  ProvisioningBrandingPage,
+  ProvisioningSecretsStore,
+} from './provisioning-secrets.store';
 import {
   containsSecretLikeKey,
   isSettingsCellCopyable,
@@ -59,6 +73,22 @@ type TermsRevision = {
   revision_id?: unknown;
 };
 
+/** Safe, non-secret UPLOAD_BRAND step payload (no urls, no bytes). */
+type BrandPayload = {
+  hasEmail?: boolean;
+  hasLoginColor?: boolean;
+  hasMainAreaFile?: boolean;
+  mainAreaPages?: ProvisioningBrandingPage[];
+};
+
+/** Resumable progress persisted on the UPLOAD_BRAND step result. */
+type BrandProgress = {
+  emailApplied?: boolean;
+  loginColorApplied?: boolean;
+  assetRef?: string;
+  pagesApplied?: ProvisioningBrandingPage[];
+};
+
 type ProvenanceCell = {
   page?: unknown;
   key?: unknown;
@@ -78,6 +108,7 @@ export class ProvisioningStepsService {
     private readonly smtp: SmtpService,
     private readonly gateways: GatewayService,
     private readonly terms: TermsService,
+    private readonly platformAssets: PlatformAssetsService,
     private readonly secrets: ProvisioningSecretsStore,
   ) {}
 
@@ -88,11 +119,7 @@ export class ProvisioningStepsService {
       case ProvisioningStepKey.APPLY_SETTINGS_TEMPLATE:
         return this.applySettingsTemplate(ctx);
       case ProvisioningStepKey.UPLOAD_BRAND:
-        // MVP: the create payload carries no brand bytes. Always SKIPPED at creation time.
-        return {
-          status: 'SKIPPED',
-          result: { reason: 'brand_upload_not_supported_in_mvp' },
-        };
+        return this.uploadBrand(ctx);
       case ProvisioningStepKey.INITIAL_ADMIN:
         return this.initialAdmin(ctx);
       case ProvisioningStepKey.TERMS:
@@ -256,6 +283,185 @@ export class ProvisioningStepsService {
     return {
       status: 'SUCCESS',
       result: { templateFromWhitelabelId: templateId, copied, skipped },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // UPLOAD_BRAND (client branding: email_branding, login text color, main_area image)
+  //
+  // Out of scope (build-time `VITE_*`, Core lacuna): institutional AppLogo, favicon, PWA icons.
+  // Idempotency: progress (emailApplied / loginColorApplied / assetRef / pagesApplied) is
+  // persisted on the FAILED step result, so a retry resumes (replace-in-place on the same
+  // main_area assetRef) instead of creating duplicate assets.
+  // ---------------------------------------------------------------------------
+
+  private async uploadBrand({
+    provisioning,
+    step,
+    meta,
+  }: StepContext): Promise<StepOutcome> {
+    const payload = (step.payload ?? {}) as BrandPayload;
+    const hasEmail = payload.hasEmail === true;
+    const hasLoginColor = payload.hasLoginColor === true;
+    const hasMainAreaFile = payload.hasMainAreaFile === true;
+    if (!hasEmail && !hasLoginColor && !hasMainAreaFile) {
+      return { status: 'SKIPPED', result: { reason: 'no_branding' } };
+    }
+
+    const whitelabelId = requireWhitelabelId(provisioning);
+    const wl = String(whitelabelId);
+    const branding = this.secrets.get(provisioning.id).branding;
+    const prior = (step.result ?? {}) as BrandProgress;
+
+    const pages: ProvisioningBrandingPage[] = (
+      branding?.mainAreaPages?.length
+        ? branding.mainAreaPages
+        : payload.mainAreaPages?.length
+          ? payload.mainAreaPages
+          : ['login']
+    ).filter(isBrandingPage);
+
+    const progress: BrandProgress = {
+      emailApplied: prior.emailApplied === true,
+      loginColorApplied: prior.loginColorApplied === true,
+      ...(typeof prior.assetRef === 'string' && prior.assetRef
+        ? { assetRef: prior.assetRef }
+        : {}),
+      pagesApplied: Array.isArray(prior.pagesApplied)
+        ? prior.pagesApplied.filter(isBrandingPage)
+        : [],
+    };
+
+    // Everything still to do needs the in-memory branding (lost on restart → re-supply on retry).
+    const needEmail = hasEmail && !progress.emailApplied;
+    const needLogin = hasLoginColor && !progress.loginColorApplied;
+    const pagesPending = pages.filter(
+      (p) => !progress.pagesApplied?.includes(p),
+    );
+    const needMainArea = hasMainAreaFile && pagesPending.length > 0;
+
+    const missing: string[] = [];
+    if (needEmail && !branding?.email) missing.push('email');
+    if (needLogin && !branding?.loginBrandPanelTextColor)
+      missing.push('loginBrandPanelTextColor');
+    if (needMainArea && !branding?.mainAreaFile && !progress.assetRef)
+      missing.push('mainAreaImage');
+    if (missing.length > 0) {
+      throw new ProvisioningStepError(
+        'E_SECRETS_REQUIRED',
+        `Branding (${missing.join(', ')}) is not in memory (restart/expiry). Retry with \`branding\` in the body (and \`mainAreaImage\` as multipart file).`,
+        { ...progress },
+      );
+    }
+
+    try {
+      if (needEmail && branding?.email) {
+        const value: Record<string, string | null> = {};
+        if (branding.email.primary_color !== undefined)
+          value.primary_color = branding.email.primary_color;
+        if (branding.email.logo_url !== undefined)
+          value.logo_url = branding.email.logo_url;
+        await this.platformConfig.update(
+          wl,
+          { page: 'email_branding', key: 'config', value },
+          meta,
+        );
+        progress.emailApplied = true;
+      }
+
+      if (needLogin && branding?.loginBrandPanelTextColor) {
+        await this.platformConfig.update(
+          wl,
+          {
+            page: 'login',
+            key: 'brand_panel_text_color',
+            value: branding.loginBrandPanelTextColor,
+          },
+          meta,
+        );
+        progress.loginColorApplied = true;
+      }
+
+      if (needMainArea) {
+        const file = branding?.mainAreaFile;
+        if (file) {
+          const multerLike = {
+            buffer: file.buffer,
+            mimetype: file.mimetype,
+            originalname: file.originalname,
+            size: file.size,
+          } as Express.Multer.File;
+          if (progress.assetRef) {
+            // Idempotent retry: same assetRef, bytes replaced in place (main_area only).
+            await this.platformAssets.replace(
+              wl,
+              progress.assetRef,
+              multerLike,
+              meta,
+            );
+          } else {
+            const uploaded = (await this.platformAssets.upload(
+              wl,
+              multerLike,
+              'main_area',
+              meta,
+            )) as { data?: { asset_ref?: unknown } } | undefined;
+            const ref = uploaded?.data?.asset_ref;
+            if (typeof ref !== 'string' || !ref) {
+              throw new ProvisioningStepError(
+                'E_ASSET_REF_MISSING',
+                'Core did not return asset_ref for the main_area upload',
+              );
+            }
+            progress.assetRef = ref;
+          }
+        }
+
+        const assetRef = progress.assetRef as string;
+        for (const page of pagesPending) {
+          await this.platformConfig.update(
+            wl,
+            {
+              page,
+              key: 'main_area_image',
+              value: {
+                capabilityId: 'platform.main_area_image',
+                version: 1,
+                enabled: true,
+                assetRef,
+              },
+            },
+            meta,
+          );
+          progress.pagesApplied = [...(progress.pagesApplied ?? []), page];
+        }
+      }
+    } catch (error) {
+      if (error instanceof ProvisioningStepError && error.result) throw error;
+      throw new ProvisioningStepError(
+        error instanceof ProvisioningStepError
+          ? error.code
+          : (errorCode(error) ?? 'E_BRANDING_FAILED'),
+        messageOf(error),
+        { ...progress },
+      );
+    }
+
+    this.secrets.discard(provisioning.id, 'branding');
+    return {
+      status: 'SUCCESS',
+      result: {
+        emailApplied: progress.emailApplied === true,
+        loginColorApplied: progress.loginColorApplied === true,
+        ...(progress.assetRef
+          ? {
+              mainArea: {
+                assetRef: progress.assetRef,
+                pages: progress.pagesApplied ?? [],
+              },
+            }
+          : {}),
+      },
     };
   }
 
@@ -571,6 +777,52 @@ export class ProvisioningStepsService {
     return { status: 'SUCCESS', result };
   }
 
+  /**
+   * Prefer FE_DEPLOY_CHECK attested urls; fall back to DNS_CHECK hosts.
+   * When both gates were skipped, returns null (delivery.urls.* stay null except primary).
+   */
+  private enabledEnvironmentsOf(
+    steps: ProvisioningStepRow[],
+  ): FrontendEnvironment[] {
+    const tenant = steps.find((s) => s.key === ProvisioningStepKey.CREATE_TENANT);
+    const payload = (tenant?.payload ?? {}) as { enabledEnvironments?: unknown };
+    return normalizeEnabledEnvironments(payload.enabledEnvironments);
+  }
+
+  private resolveConfirmedFrontendUrls(
+    steps: ProvisioningStepRow[],
+  ): Partial<Record<FrontendEnvironment, string>> | null {
+    const enabled = this.enabledEnvironmentsOf(steps);
+    const fe = steps.find((s) => s.key === ProvisioningStepKey.FE_DEPLOY_CHECK);
+    if (fe?.status === ProvisioningStepStatus.SUCCESS) {
+      const result = (fe.result ?? {}) as { urls?: unknown };
+      const raw = result.urls;
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const flat: Record<string, unknown> = {};
+        for (const [env, cell] of Object.entries(
+          raw as Record<string, unknown>,
+        )) {
+          if (cell && typeof cell === 'object' && !Array.isArray(cell)) {
+            flat[env] = (cell as Record<string, unknown>).url;
+          } else {
+            flat[env] = cell;
+          }
+        }
+        const parsed = parseFrontendUrls(flat, enabled);
+        if (parsed.ok) return parsed.urls;
+      }
+    }
+
+    const dns = steps.find((s) => s.key === ProvisioningStepKey.DNS_CHECK);
+    if (dns?.status === ProvisioningStepStatus.SUCCESS) {
+      const result = (dns.result ?? {}) as { hosts?: unknown };
+      const parsed = parseDnsHosts(result.hosts, enabled);
+      if (parsed.ok) return urlsFromDnsHosts(parsed.hosts);
+    }
+
+    return null;
+  }
+
   private async deliver({
     provisioning,
     meta,
@@ -591,20 +843,46 @@ export class ProvisioningStepsService {
       adminStep?.status === ProvisioningStepStatus.SUCCESS &&
       adminPayload?.email;
 
+    const brandStep = current.steps.find(
+      (s) => s.key === ProvisioningStepKey.UPLOAD_BRAND,
+    );
+    const brandResult = (brandStep?.result ?? {}) as {
+      emailApplied?: boolean;
+      mainArea?: { assetRef?: string };
+    };
+    const branding =
+      brandStep?.status === ProvisioningStepStatus.SUCCESS
+        ? {
+            email: brandResult.emailApplied === true,
+            ...(brandResult.mainArea?.assetRef
+              ? { mainAreaAssetRef: brandResult.mainArea.assetRef }
+              : {}),
+          }
+        : null;
+
+    const enabled = this.enabledEnvironmentsOf(current.steps);
+    const confirmed = this.resolveConfirmedFrontendUrls(current.steps);
+    const suggested = suggestedFrontendUrls(current.slug, enabled);
+    const urls: Record<string, string | null> = { primary: current.baseUrl };
+    for (const env of FRONTEND_ENVIRONMENTS) {
+      if (!enabled.includes(env)) continue;
+      urls[env] = confirmed?.[env] ?? null;
+    }
     const delivery = {
+      branding,
       name: current.name,
       slug: current.slug,
       baseUrl: current.baseUrl,
       whitelabelId: current.whitelabelId,
+      enabledEnvironments: enabled.map((e) => FRONTEND_TO_CAPABILITY[e]),
       admin: hasAdmin
         ? { email: adminPayload.email, name: adminPayload.name ?? null }
         : null,
-      urls: { primary: current.baseUrl, investor: current.baseUrl },
-      // Convention only (`{slug}.empresa.loor.vc` / `{slug}.admin.loor.vc`) — not verified, not guaranteed.
+      // Only enabled + attested URLs. Disabled environments are omitted (not errors).
+      urls,
       suggestedUrls: {
-        entrepreneur: `https://${current.slug}.empresa.loor.vc`,
-        admin: `https://${current.slug}.admin.loor.vc`,
-        note: 'Suggested by naming convention; confirm FE deploy / DNS before sharing.',
+        ...suggested,
+        note: 'Homolog convention only for contracted environments. Share delivery.urls after gates — not these suggestions.',
       },
       credentialsNote:
         'The temporary admin password is never stored; communicate it through a secure out-of-band channel.',
@@ -646,6 +924,20 @@ function errorCode(error: unknown): string | undefined {
     if (typeof code === 'string') return code;
   }
   return undefined;
+}
+
+function isBrandingPage(value: unknown): value is ProvisioningBrandingPage {
+  return value === 'login' || value === 'register' || value === 'quick_profile';
+}
+
+function messageOf(error: unknown): string {
+  const response = (error as { getResponse?: () => unknown })?.getResponse?.();
+  if (response && typeof response === 'object') {
+    const message = (response as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+    if (Array.isArray(message)) return message.join('; ');
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isCode(error: unknown, code: string): boolean {

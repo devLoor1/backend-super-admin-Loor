@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AdministratorModule } from '../administrator/administrator.module';
 import { AuditModule } from '../audit/audit.module';
 import { GatewayModule } from '../gateway/gateway.module';
+import { PlatformAssetsModule } from '../platform-assets/platform-assets.module';
 import { PlatformConfigModule } from '../platform-config/platform-config.module';
 import { SmtpModule } from '../smtp/smtp.module';
 import { TermsModule } from '../terms/terms.module';
@@ -21,6 +22,7 @@ import { WhitelabelProvisioningService } from './whitelabel-provisioning.service
     WhitelabelModule,
     AdministratorModule,
     PlatformConfigModule,
+    PlatformAssetsModule,
     SmtpModule,
     GatewayModule,
     TermsModule,

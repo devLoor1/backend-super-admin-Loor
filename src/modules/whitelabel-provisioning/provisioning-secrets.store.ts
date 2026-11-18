@@ -11,10 +11,28 @@ export type ProvisioningInitialAdminSecret = {
   temporaryPassword: string;
 };
 
+export type ProvisioningBrandingPage = 'login' | 'register' | 'quick_profile';
+
+export type ProvisioningBrandingFile = {
+  buffer: Buffer;
+  mimetype: string;
+  originalname: string;
+  size: number;
+};
+
+/** Client branding for UPLOAD_BRAND. The image bytes live here only — never in Prisma. */
+export type ProvisioningBrandingSecret = {
+  email?: { primary_color?: string | null; logo_url?: string | null };
+  loginBrandPanelTextColor?: string;
+  mainAreaPages?: ProvisioningBrandingPage[];
+  mainAreaFile?: ProvisioningBrandingFile;
+};
+
 export type ProvisioningSecrets = {
   initialAdmin?: ProvisioningInitialAdminSecret;
   smtp?: Record<string, unknown>;
   gateway?: { items: unknown[] };
+  branding?: ProvisioningBrandingSecret;
 };
 
 type Entry = { secrets: ProvisioningSecrets; expiresAt: number };
@@ -41,6 +59,10 @@ export class ProvisioningSecretsStore {
     if (secrets.initialAdmin) merged.initialAdmin = secrets.initialAdmin;
     if (secrets.smtp) merged.smtp = secrets.smtp;
     if (secrets.gateway) merged.gateway = secrets.gateway;
+    if (secrets.branding) {
+      // Retry may re-supply only part of the branding (e.g. just the file): merge, don't drop.
+      merged.branding = { ...(current.branding ?? {}), ...secrets.branding };
+    }
     if (Object.keys(merged).length === 0) return;
     this.entries.set(provisioningId, {
       secrets: merged,

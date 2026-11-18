@@ -15,10 +15,15 @@ import {
 import { PrismaService } from '../../database/prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { CompleteManualStepDto } from './dto/complete-manual-step.dto';
-import { CreateProvisioningDto } from './dto/create-provisioning.dto';
+import {
+  CreateProvisioningDto,
+  ProvisioningBrandingDto,
+} from './dto/create-provisioning.dto';
 import { RetryProvisioningDto } from './dto/retry-provisioning.dto';
 import { ProvisioningRunnerService } from './provisioning-runner.service';
 import {
+  ProvisioningBrandingFile,
+  ProvisioningBrandingSecret,
   ProvisioningSecretsStore,
   ProvisioningSecrets,
 } from './provisioning-secrets.store';
@@ -26,6 +31,14 @@ import {
   ProvisioningRunMeta,
   ProvisioningWithSteps,
 } from './provisioning-steps.service';
+import {
+  FRONTEND_TO_CAPABILITY,
+  FrontendEnvironment,
+  normalizeEnabledEnvironments,
+  parseDnsHosts,
+  parseFrontendUrls,
+  suggestedFrontendUrls,
+} from './frontend-urls';
 import {
   ACTIVE_PROVISIONING_STATUSES,
   isManualGate,
@@ -35,6 +48,42 @@ import {
 } from './provisioning.constants';
 
 type RequestMeta = ProvisioningRunMeta;
+
+function brandingPlanned(branding?: ProvisioningBrandingSecret): boolean {
+  return Boolean(
+    branding?.email ||
+    branding?.loginBrandPanelTextColor ||
+    branding?.mainAreaFile,
+  );
+}
+
+/** DTO branding (+ optional file) → in-memory secret. Returns undefined when nothing to apply. */
+function toBrandingSecret(
+  branding: ProvisioningBrandingDto | undefined,
+  file: ProvisioningBrandingFile | undefined,
+): ProvisioningBrandingSecret | undefined {
+  const out: ProvisioningBrandingSecret = {};
+  const email: NonNullable<ProvisioningBrandingSecret['email']> = {};
+  if (branding?.email?.primary_color !== undefined)
+    email.primary_color = branding.email.primary_color;
+  if (branding?.email?.logo_url !== undefined)
+    email.logo_url = branding.email.logo_url;
+  if (Object.keys(email).length > 0) out.email = email;
+  if (branding?.loginBrandPanelTextColor)
+    out.loginBrandPanelTextColor = branding.loginBrandPanelTextColor;
+  if (file?.buffer?.length) {
+    out.mainAreaFile = {
+      buffer: file.buffer,
+      mimetype: file.mimetype,
+      originalname: file.originalname,
+      size: file.size,
+    };
+    out.mainAreaPages = branding?.mainArea?.pages?.length
+      ? [...branding.mainArea.pages]
+      : ['login'];
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 @Injectable()
 export class WhitelabelProvisioningService {
@@ -51,7 +100,11 @@ export class WhitelabelProvisioningService {
   // create
   // ---------------------------------------------------------------------------
 
-  async create(dto: CreateProvisioningDto, meta: RequestMeta) {
+  async create(
+    dto: CreateProvisioningDto,
+    meta: RequestMeta,
+    mainAreaFile?: ProvisioningBrandingFile,
+  ) {
     const slug = dto.slug.trim().toLowerCase();
 
     const inFlight = await this.prisma.whitelabelProvisioning.findFirst({
@@ -70,7 +123,8 @@ export class WhitelabelProvisioningService {
     const skipDns = dto.skipDnsCheck === true;
     const now = new Date();
 
-    const plan = this.planSteps(dto, { skipFe, skipDns });
+    const brandingSecret = toBrandingSecret(dto.branding, mainAreaFile);
+    const plan = this.planSteps(dto, { skipFe, skipDns }, brandingSecret);
 
     const created = await this.prisma.whitelabelProvisioning.create({
       data: {
@@ -110,6 +164,7 @@ export class WhitelabelProvisioningService {
     }
     if (dto.smtp) secrets.smtp = dto.smtp;
     if (dto.gateway) secrets.gateway = { items: dto.gateway.items };
+    if (brandingSecret) secrets.branding = brandingSecret;
     this.secrets.set(created.id, secrets);
 
     await this.safeAudit({
@@ -127,6 +182,13 @@ export class WhitelabelProvisioningService {
           terms: Boolean(dto.terms),
           smtp: Boolean(dto.smtp),
           gateway: Boolean(dto.gateway),
+          branding: {
+            email: Boolean(brandingSecret?.email),
+            loginBrandPanelTextColor: Boolean(
+              brandingSecret?.loginBrandPanelTextColor,
+            ),
+            mainAreaFile: Boolean(brandingSecret?.mainAreaFile),
+          },
           skipFeDeployCheck: skipFe,
           skipDnsCheck: skipDns,
         },
@@ -190,6 +252,7 @@ export class WhitelabelProvisioningService {
     id: string,
     dto: RetryProvisioningDto | undefined,
     meta: RequestMeta,
+    mainAreaFile?: ProvisioningBrandingFile,
   ) {
     const body = dto ?? {};
     const provisioning = await this.requireProvisioning(id);
@@ -240,6 +303,8 @@ export class WhitelabelProvisioningService {
       };
     }
     if (body.gateway) resupplied.gateway = { items: body.gateway.items };
+    const brandingSecret = toBrandingSecret(body.branding, mainAreaFile);
+    if (brandingSecret) resupplied.branding = brandingSecret;
     this.secrets.set(id, resupplied);
 
     // Guard against concurrent retries: only one caller can flip FAILED → PENDING.
@@ -312,7 +377,11 @@ export class WhitelabelProvisioningService {
       });
     }
 
-    const required = MANUAL_GATE_CHECKLIST[stepKey] ?? [];
+    const enabled = this.enabledEnvironmentsOf(provisioning);
+    const required =
+      stepKey === ProvisioningStepKey.FE_DEPLOY_CHECK
+        ? enabled
+        : (MANUAL_GATE_CHECKLIST[stepKey] ?? []);
     const checklist = (dto.checklist ?? {}) as Record<
       string,
       boolean | undefined
@@ -323,8 +392,16 @@ export class WhitelabelProvisioningService {
         code: 'E_CHECKLIST_INCOMPLETE',
         message: `All checklist items must be true for ${stepKey}`,
         missing,
+        enabledEnvironments: enabled.map((e) => FRONTEND_TO_CAPABILITY[e]),
       });
     }
+
+    const gateExtra = this.buildManualGateResult(
+      stepKey,
+      dto,
+      provisioning.slug,
+      enabled,
+    );
 
     const completedAt = new Date();
     const updated = await this.prisma.whitelabelProvisioningStep.updateMany({
@@ -337,6 +414,7 @@ export class WhitelabelProvisioningService {
         completedAt,
         result: scrubSecrets({
           checklist: Object.fromEntries(required.map((field) => [field, true])),
+          ...gateExtra,
           note: dto.note?.trim() || null,
           completedBy: meta.operatorId,
           completedAt: completedAt.toISOString(),
@@ -361,6 +439,7 @@ export class WhitelabelProvisioningService {
       afterData: {
         stepKey,
         checklist: Object.fromEntries(required.map((f) => [f, true])),
+        ...gateExtra,
       },
       result: 'success',
       correlationId: meta.correlationId,
@@ -375,6 +454,73 @@ export class WhitelabelProvisioningService {
   // ---------------------------------------------------------------------------
   // helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * FE_DEPLOY_CHECK requires real https `urls` for the three apps.
+   * DNS_CHECK requires `hosts` attestation (url + status=ok + https=true) — Nest does not probe DNS.
+   */
+  private enabledEnvironmentsOf(provisioning: {
+    steps: Array<{ key: ProvisioningStepKey; payload: unknown }>;
+  }): FrontendEnvironment[] {
+    const tenant = provisioning.steps.find(
+      (s) => s.key === ProvisioningStepKey.CREATE_TENANT,
+    );
+    const payload = (tenant?.payload ?? {}) as {
+      enabledEnvironments?: unknown;
+    };
+    return normalizeEnabledEnvironments(payload.enabledEnvironments);
+  }
+
+  private buildManualGateResult(
+    stepKey: ProvisioningStepKey,
+    dto: CompleteManualStepDto,
+    slug: string,
+    enabled: readonly FrontendEnvironment[],
+  ): Record<string, unknown> {
+    if (stepKey === ProvisioningStepKey.FE_DEPLOY_CHECK) {
+      const parsed = parseFrontendUrls(dto.urls, enabled);
+      if (!parsed.ok) {
+        throw new UnprocessableEntityException({
+          code: 'E_FRONTEND_URLS_REQUIRED',
+          message: `FE_DEPLOY_CHECK requires https urls for: ${enabled.join(', ')}`,
+          missing: parsed.missing,
+          suggestedUrls: suggestedFrontendUrls(slug, enabled),
+        });
+      }
+      return {
+        enabledEnvironments: enabled.map((e) => FRONTEND_TO_CAPABILITY[e]),
+        urls: Object.fromEntries(
+          enabled.map((env) => [
+            env,
+            { url: parsed.urls[env], status: 'ok' },
+          ]),
+        ),
+      };
+    }
+
+    if (stepKey === ProvisioningStepKey.DNS_CHECK) {
+      const parsed = parseDnsHosts(dto.hosts, enabled);
+      if (!parsed.ok) {
+        throw new UnprocessableEntityException({
+          code: 'E_DNS_HOSTS_REQUIRED',
+          message: `DNS_CHECK requires hosts for: ${enabled.join(', ')}`,
+          missing: parsed.missing,
+          suggestedUrls: suggestedFrontendUrls(slug, enabled),
+        });
+      }
+      return {
+        enabledEnvironments: enabled.map((e) => FRONTEND_TO_CAPABILITY[e]),
+        hosts: Object.fromEntries(
+          parsed.hosts.map((h) => [
+            h.environment,
+            { host: h.host, url: h.url, status: h.status, https: h.https },
+          ]),
+        ),
+      };
+    }
+
+    return {};
+  }
 
   private async requireProvisioning(id: string) {
     const row = await this.prisma.whitelabelProvisioning.findUnique({
@@ -394,14 +540,18 @@ export class WhitelabelProvisioningService {
   private planSteps(
     dto: CreateProvisioningDto,
     flags: { skipFe: boolean; skipDns: boolean },
+    branding?: ProvisioningBrandingSecret,
   ): Record<
     ProvisioningStepKey,
     { payload?: Record<string, unknown>; skipReason?: string }
   > {
+    const enabled = normalizeEnabledEnvironments(dto.enabledEnvironments);
+    const enabledCapabilities = enabled.map((e) => FRONTEND_TO_CAPABILITY[e]);
     const tenantPayload = {
       name: dto.name.trim(),
       slug: dto.slug,
       baseUrl: dto.baseUrl.trim(),
+      enabledEnvironments: enabledCapabilities,
     };
     return {
       [ProvisioningStepKey.CREATE_TENANT]: { payload: tenantPayload },
@@ -413,10 +563,19 @@ export class WhitelabelProvisioningService {
                 templateFromWhitelabelId: dto.templateFromWhitelabelId,
               },
             },
-      // MVP: no brand bytes in the create payload → always skipped.
-      [ProvisioningStepKey.UPLOAD_BRAND]: {
-        skipReason: 'brand_upload_not_supported_in_mvp',
-      },
+      // Metadata only: never urls, bytes or passwords (those live in the secrets store).
+      [ProvisioningStepKey.UPLOAD_BRAND]: brandingPlanned(branding)
+        ? {
+            payload: {
+              hasEmail: Boolean(branding?.email),
+              hasLoginColor: Boolean(branding?.loginBrandPanelTextColor),
+              hasMainAreaFile: Boolean(branding?.mainAreaFile),
+              mainAreaPages: branding?.mainAreaFile
+                ? (branding.mainAreaPages ?? ['login'])
+                : [],
+            },
+          }
+        : { skipReason: 'no_branding' },
       [ProvisioningStepKey.INITIAL_ADMIN]: dto.initialAdmin
         ? {
             // Never the password.
@@ -442,10 +601,20 @@ export class WhitelabelProvisioningService {
         : { skipReason: 'no_gateway' },
       [ProvisioningStepKey.FE_DEPLOY_CHECK]: flags.skipFe
         ? { skipReason: 'skip_requested' }
-        : { payload: { manual: true } },
+        : {
+            payload: {
+              manual: true,
+              enabledEnvironments: enabledCapabilities,
+            },
+          },
       [ProvisioningStepKey.DNS_CHECK]: flags.skipDns
         ? { skipReason: 'skip_requested' }
-        : { payload: { manual: true } },
+        : {
+            payload: {
+              manual: true,
+              enabledEnvironments: enabledCapabilities,
+            },
+          },
       [ProvisioningStepKey.VALIDATE]: {},
       [ProvisioningStepKey.DELIVER]: {},
     };
