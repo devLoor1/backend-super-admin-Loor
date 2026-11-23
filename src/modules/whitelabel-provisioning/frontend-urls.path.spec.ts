@@ -49,4 +49,13 @@ describe('frontend-urls PATH infrastructure', () => {
       admin: 'https://cliente-x.admin.loor.vc',
     });
   });
+
+  it('templates keep {slug} placeholder for Super Admin autofill', () => {
+    expect(
+      suggestedFrontendUrls('{slug}', ['investor'], 'HOSTNAME').investor,
+    ).toBe('https://{slug}.loor.vc');
+    expect(
+      suggestedFrontendUrls('{slug}', ['investor'], 'PATH').investor,
+    ).toBe('https://homolog.loor.vc/w/{slug}');
+  });
 });

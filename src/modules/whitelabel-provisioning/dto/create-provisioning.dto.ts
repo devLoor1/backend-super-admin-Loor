@@ -225,9 +225,9 @@ export class CreateProvisioningDto {
   @ApiPropertyOptional({
     enum: ['HOSTNAME', 'PATH'],
     description:
-      'HOSTNAME = {slug}.investor|empresa|admin.loor.vc (future). ' +
-      'PATH = shared Netlify /w/{slug} demo links (homolog without wildcard DNS). ' +
-      'Omitted → PROVISIONING_FRONTEND_URL_MODE env, else HOSTNAME.',
+      'Deprecated client hint — Nest always applies PROVISIONING_FRONTEND_URL_MODE. ' +
+      'HOSTNAME = {slug}.loor.vc / {slug}.empresa.loor.vc / {slug}.admin.loor.vc. ' +
+      'PATH = shared Netlify /w/{slug}. Prefer GET /whitelabel-provisionings/config.',
   })
   @IsOptional()
   @IsIn(['HOSTNAME', 'PATH'])

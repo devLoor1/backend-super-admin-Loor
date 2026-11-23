@@ -8,6 +8,7 @@ import {
   Param,
   ParseEnumPipe,
   Post,
+  Query,
   Req,
   UploadedFile,
   UseInterceptors,
@@ -85,6 +86,20 @@ function metaOf(user: AuthenticatedOperator, req: Req_) {
 @Controller('whitelabel-provisionings')
 export class WhitelabelProvisioningController {
   constructor(private readonly service: WhitelabelProvisioningService) {}
+
+  @Get('config')
+  @Roles(ROLES.SUPER_ADMIN, ROLES.SUPPORT_ADMIN, ROLES.READ_ONLY)
+  @ApiOperation({
+    summary: 'Provisioning frontend URL mode + templates (Nest source of truth)',
+    description:
+      'Returns `PROVISIONING_FRONTEND_URL_MODE` and per-environment URL templates ' +
+      'with a `{slug}` placeholder. Optional `?slug=` also returns concrete suggestedUrls. ' +
+      'Super Admin must use this instead of a Vite URL-mode env.',
+  })
+  @ApiOkResponse()
+  frontendUrlConfig(@Query('slug') slug?: string) {
+    return this.service.frontendUrlConfig(slug);
+  }
 
   @Post()
   @Roles(ROLES.SUPER_ADMIN)
