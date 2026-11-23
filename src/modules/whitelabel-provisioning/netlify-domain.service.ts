@@ -85,6 +85,16 @@ export class NetlifyDomainService {
     return map[env] || null;
   }
 
+  /** Netlify site ids are UUIDs. Truncation yields GET /sites/{id} → 404. */
+  isValidSiteId(siteId: string | null | undefined): boolean {
+    return Boolean(
+      siteId &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          siteId,
+        ),
+    );
+  }
+
   isConfigured(enabled: readonly FrontendEnvironment[]): boolean {
     if (!this.accessToken()) return false;
     return enabled.every((env) => Boolean(this.siteIdFor(env)));
@@ -179,6 +189,12 @@ export class NetlifyDomainService {
       return {
         ...base,
         error: `Netlify site id missing for ${env}`,
+      };
+    }
+    if (!this.isValidSiteId(siteId)) {
+      return {
+        ...base,
+        error: `Invalid NETLIFY_${env.toUpperCase()}_SITE_ID format (len=${siteId.length}, value=${siteId}). Expected a full UUID — check Render env for truncation.`,
       };
     }
 
