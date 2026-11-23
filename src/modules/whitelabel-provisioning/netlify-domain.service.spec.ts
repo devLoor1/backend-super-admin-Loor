@@ -58,9 +58,9 @@ describe('NetlifyDomainService.ensureHostnameAliases', () => {
       get: (key: string) => {
         const map: Record<string, string> = {
           'netlify.accessToken': 'test-token-not-real',
-          'netlify.siteIds.investor': 'site-investor',
-          'netlify.siteIds.entrepreneur': 'site-entrepreneur',
-          'netlify.siteIds.admin': 'site-admin',
+          'netlify.siteIds.investor': '11111111-1111-1111-1111-111111111111',
+          'netlify.siteIds.entrepreneur': '22222222-2222-2222-2222-222222222222',
+          'netlify.siteIds.admin': '33333333-3333-3333-3333-333333333333',
         };
         return map[key];
       },
@@ -94,7 +94,7 @@ describe('NetlifyDomainService.ensureHostnameAliases', () => {
           status: 200,
           text: async () =>
             JSON.stringify({
-              id: 'site-admin',
+              id: '33333333-3333-3333-3333-333333333333',
               name: 'homologadmin',
               domain_aliases: currentAliases,
               custom_domain: 'homolog.admin.loor.vc',
@@ -106,7 +106,7 @@ describe('NetlifyDomainService.ensureHostnameAliases', () => {
         status: 200,
         text: async () =>
           JSON.stringify({
-            id: 'site-admin',
+            id: '33333333-3333-3333-3333-333333333333',
             name: 'homologadmin',
             domain_aliases: currentAliases,
             custom_domain: 'homolog.admin.loor.vc',
