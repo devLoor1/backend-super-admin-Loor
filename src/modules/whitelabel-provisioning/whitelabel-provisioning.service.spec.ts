@@ -172,7 +172,7 @@ function baseDto(
     name: 'Acme Capital',
     slug: 'acme-capital',
     baseUrl: 'https://acme-capital.wallet.loor.vc',
-    // Unit tests pin HOSTNAME so local Nest .env PATH mode does not skew expectations.
+    // Client urlMode is ignored by Nest (env is source of truth); kept for DTO shape.
     urlMode: 'HOSTNAME',
     skipDnsCheck: true,
     ...overrides,
@@ -350,6 +350,15 @@ const statusOf = (
 ) => res.data.steps.find((s) => s.key === key)?.status;
 
 describe('WhitelabelProvisioningService (MVP)', () => {
+  const prevUrlMode = process.env.PROVISIONING_FRONTEND_URL_MODE;
+  beforeAll(() => {
+    process.env.PROVISIONING_FRONTEND_URL_MODE = 'HOSTNAME';
+  });
+  afterAll(() => {
+    if (prevUrlMode === undefined) delete process.env.PROVISIONING_FRONTEND_URL_MODE;
+    else process.env.PROVISIONING_FRONTEND_URL_MODE = prevUrlMode;
+  });
+
   it('happy path: automatic FE/DNS readiness completes without manual gates', async () => {
     const t = setup();
     const done = await t.service.create(
@@ -1063,6 +1072,15 @@ describe('WhitelabelProvisioningService (MVP)', () => {
 });
 
 describe('UPLOAD_BRAND', () => {
+  const prevUrlMode = process.env.PROVISIONING_FRONTEND_URL_MODE;
+  beforeAll(() => {
+    process.env.PROVISIONING_FRONTEND_URL_MODE = 'HOSTNAME';
+  });
+  afterAll(() => {
+    if (prevUrlMode === undefined) delete process.env.PROVISIONING_FRONTEND_URL_MODE;
+    else process.env.PROVISIONING_FRONTEND_URL_MODE = prevUrlMode;
+  });
+
   const stepRes = (
     res: { data: { steps: Array<{ key: K }> } },
     key: K,

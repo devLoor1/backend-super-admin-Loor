@@ -32,6 +32,7 @@ import {
   ProvisioningWithSteps,
 } from './provisioning-steps.service';
 import {
+  FRONTEND_ENVIRONMENTS,
   FRONTEND_TO_CAPABILITY,
   FrontendEnvironment,
   normalizeEnabledEnvironments,
@@ -122,7 +123,8 @@ export class WhitelabelProvisioningService {
       });
     }
 
-    const urlMode = normalizeFrontendUrlMode(dto.urlMode);
+    // Nest env is the single source of truth — never trust client urlMode.
+    const urlMode = normalizeFrontendUrlMode(undefined);
     const skipFe = dto.skipFeDeployCheck === true;
     // PATH mode has no per-tenant DNS — always skip DNS_CHECK.
     const skipDns =
@@ -257,6 +259,38 @@ export class WhitelabelProvisioningService {
       });
     }
     return { data: this.present(row) };
+  }
+
+  /**
+   * Shared FE URL mode + templates for Super Admin wizard autofill.
+   * Mode always comes from `PROVISIONING_FRONTEND_URL_MODE` (Nest source of truth).
+   * Templates use the literal `{slug}` placeholder so the FE can substitute locally.
+   */
+  frontendUrlConfig(slug?: string) {
+    const urlMode = normalizeFrontendUrlMode(undefined);
+    const urlTemplates = suggestedFrontendUrls(
+      '{slug}',
+      FRONTEND_ENVIRONMENTS,
+      urlMode,
+    );
+    const safe = String(slug || '')
+      .trim()
+      .toLowerCase();
+    return {
+      data: {
+        urlMode,
+        urlTemplates,
+        ...(safe
+          ? {
+              suggestedUrls: suggestedFrontendUrls(
+                safe,
+                FRONTEND_ENVIRONMENTS,
+                urlMode,
+              ),
+            }
+          : {}),
+      },
+    };
   }
 
   // ---------------------------------------------------------------------------
