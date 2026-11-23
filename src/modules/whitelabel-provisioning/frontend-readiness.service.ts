@@ -77,6 +77,8 @@ export class FrontendReadinessService {
       const list = [suggested[env]];
       if (urlMode === 'HOSTNAME') {
         if (env === 'investor') {
+          // Legacy / alternate investor hosts (primary is already {slug}.loor.vc).
+          list.push(`https://${safe}.investor.loor.vc`);
           list.push(`https://${safe}.investidor.loor.vc`);
           if (safe === 'homologacao' || safe === 'homolog') {
             list.push('https://homolog.loor.vc');

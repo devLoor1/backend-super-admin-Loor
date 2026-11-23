@@ -33,4 +33,16 @@ export default () => ({
       process.env.ENTREPRENEUR_BASE_URL || 'https://homolog.empresa.loor.vc',
     adminBaseUrl: process.env.ADMIN_BASE_URL || 'https://homolog.admin.loor.vc',
   },
+  /**
+   * Shared Netlify sites for HOSTNAME domain aliases.
+   * Token stays server-side only — never returned by API or logged.
+   */
+  netlify: {
+    accessToken: process.env.NETLIFY_ACCESS_TOKEN || '',
+    siteIds: {
+      investor: process.env.NETLIFY_INVESTOR_SITE_ID || '',
+      entrepreneur: process.env.NETLIFY_ENTREPRENEUR_SITE_ID || '',
+      admin: process.env.NETLIFY_ADMIN_SITE_ID || '',
+    },
+  },
 });

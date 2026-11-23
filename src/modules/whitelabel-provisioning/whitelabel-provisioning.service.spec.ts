@@ -181,7 +181,7 @@ function baseDto(
 
 function feUrls(slug = 'acme-capital') {
   return {
-    investor: `https://${slug}.investor.loor.vc`,
+    investor: `https://${slug}.loor.vc`,
     entrepreneur: `https://${slug}.empresa.loor.vc`,
     admin: `https://${slug}.admin.loor.vc`,
   };
@@ -298,6 +298,10 @@ function setup() {
       };
     }),
   };
+  const netlifyDomains = {
+    isConfigured: jest.fn(() => false),
+    ensureHostnameAliases: jest.fn(),
+  };
   const steps = new ProvisioningStepsService(
     fake.prisma as never,
     whitelabels as never,
@@ -309,6 +313,7 @@ function setup() {
     platformAssets as never,
     secrets,
     frontendReadiness as never,
+    netlifyDomains as never,
   );
   const runner = new ProvisioningRunnerService(
     fake.prisma as never,
@@ -320,6 +325,7 @@ function setup() {
     runner,
     secrets,
     audit as never,
+    netlifyDomains as never,
   );
 
   return {
@@ -369,12 +375,13 @@ describe('WhitelabelProvisioningService (MVP)', () => {
     expect(statusOf(done, K.SMTP)).toBe(S.SKIPPED);
     expect(statusOf(done, K.GATEWAY_CONFIG)).toBe(S.SKIPPED);
     expect(statusOf(done, K.FE_DEPLOY_CHECK)).toBe(S.SUCCESS);
+    expect(statusOf(done, K.CONFIGURE_FRONTEND_DOMAINS)).toBe(S.SKIPPED);
     expect(statusOf(done, K.DNS_CHECK)).toBe(S.SKIPPED);
     expect(statusOf(done, K.VALIDATE)).toBe(S.SUCCESS);
     expect(statusOf(done, K.DELIVER)).toBe(S.SUCCESS);
     expect(done.data.progress).toEqual({
-      completed: 11,
-      total: 11,
+      completed: 12,
+      total: 12,
       percentage: 100,
     });
     expect(t.whitelabels.create).toHaveBeenCalledTimes(1);
@@ -394,12 +401,12 @@ describe('WhitelabelProvisioningService (MVP)', () => {
       admin: { email: 'ana@acme.example', name: 'Ana' },
       urls: {
         primary: 'https://acme-capital.wallet.loor.vc',
-        investor: 'https://acme-capital.investor.loor.vc',
+        investor: 'https://acme-capital.loor.vc',
         entrepreneur: 'https://acme-capital.empresa.loor.vc',
         admin: 'https://acme-capital.admin.loor.vc',
       },
       suggestedUrls: {
-        investor: 'https://acme-capital.investor.loor.vc',
+        investor: 'https://acme-capital.loor.vc',
         entrepreneur: 'https://acme-capital.empresa.loor.vc',
         admin: 'https://acme-capital.admin.loor.vc',
       },
@@ -409,7 +416,7 @@ describe('WhitelabelProvisioningService (MVP)', () => {
     ).toMatchObject({
       mode: 'shared_frontend',
       urls: {
-        investor: { url: 'https://acme-capital.investor.loor.vc', status: 'ok' },
+        investor: { url: 'https://acme-capital.loor.vc', status: 'ok' },
       },
     });
     expect(t.secrets.has(done.data.id)).toBe(false);
@@ -432,7 +439,7 @@ describe('WhitelabelProvisioningService (MVP)', () => {
     ).toMatchObject({
       hosts: {
         investor: {
-          host: 'acme-capital.investor.loor.vc',
+          host: 'acme-capital.loor.vc',
           status: 'ok',
           https: true,
         },
@@ -440,7 +447,7 @@ describe('WhitelabelProvisioningService (MVP)', () => {
     });
     expect(done.data.delivery).toMatchObject({
       urls: {
-        investor: 'https://acme-capital.investor.loor.vc',
+        investor: 'https://acme-capital.loor.vc',
         entrepreneur: 'https://acme-capital.empresa.loor.vc',
         admin: 'https://acme-capital.admin.loor.vc',
       },
@@ -457,8 +464,8 @@ describe('WhitelabelProvisioningService (MVP)', () => {
         {
           environment: 'investor',
           capability: 'INVESTOR',
-          url: 'https://acme-capital.investor.loor.vc',
-          host: 'acme-capital.investor.loor.vc',
+          url: 'https://acme-capital.loor.vc',
+          host: 'acme-capital.loor.vc',
           resolves: false,
           httpsOk: false,
           httpStatus: null,
@@ -742,7 +749,7 @@ describe('WhitelabelProvisioningService (MVP)', () => {
         admin: null,
       },
       suggestedUrls: {
-        investor: 'https://acme-capital.investor.loor.vc',
+        investor: 'https://acme-capital.loor.vc',
         entrepreneur: 'https://acme-capital.empresa.loor.vc',
         admin: 'https://acme-capital.admin.loor.vc',
       },
@@ -764,8 +771,8 @@ describe('WhitelabelProvisioningService (MVP)', () => {
         environments.push({
           environment: 'investor',
           capability: 'INVESTOR',
-          url: `https://${slug}.investor.loor.vc`,
-          host: `${slug}.investor.loor.vc`,
+          url: `https://${slug}.loor.vc`,
+          host: `${slug}.loor.vc`,
           resolves: true,
           httpsOk: true,
           httpStatus: 200,
@@ -811,7 +818,7 @@ describe('WhitelabelProvisioningService (MVP)', () => {
     expect(created.data.delivery).toMatchObject({
       enabledEnvironments: ['INVESTOR', 'ADMIN'],
       urls: {
-        investor: 'https://acme-capital.investor.loor.vc',
+        investor: 'https://acme-capital.loor.vc',
         admin: 'https://acme-capital.admin.loor.vc',
       },
     });
@@ -1396,7 +1403,7 @@ describe('UPLOAD_BRAND', () => {
 
 describe('provisioning constants', () => {
   it('STEP_ORDER covers every step once, tenant first and deliver last', () => {
-    expect(new Set(STEP_ORDER).size).toBe(11);
+    expect(new Set(STEP_ORDER).size).toBe(12);
     expect(STEP_ORDER[0]).toBe(K.CREATE_TENANT);
     expect(STEP_ORDER[STEP_ORDER.length - 1]).toBe(K.DELIVER);
   });
