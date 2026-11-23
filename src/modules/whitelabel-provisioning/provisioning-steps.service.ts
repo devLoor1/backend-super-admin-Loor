@@ -869,8 +869,8 @@ export class ProvisioningStepsService {
 
     if (!report.ok) {
       const failed = report.environments
-        .filter((row) => row.error || row.readiness.status !== 'ok')
-        .map((row) => `${row.environment}: ${row.error ?? row.readiness.error ?? 'failed'}`)
+        .filter((row) => row.error)
+        .map((row) => `${row.environment}: ${row.error}`)
         .join('; ');
       throw new ProvisioningStepError(
         'E_NETLIFY_DOMAIN_CONFIG_FAILED',
@@ -887,7 +887,7 @@ export class ProvisioningStepsService {
   }: StepContext): Promise<StepOutcome> {
     const enabled = this.enabledEnvironmentsFromProvisioning(provisioning);
     const urlMode = this.urlModeFromProvisioning(provisioning);
-    const report = await this.frontendReadiness.verifyProvisioning({
+    const report = await this.frontendReadiness.verifyProvisioningWithRetry({
       slug: provisioning.slug,
       enabledEnvironments: enabled.map((e) => FRONTEND_TO_CAPABILITY[e]),
       urlMode,
@@ -903,6 +903,10 @@ export class ProvisioningStepsService {
         enabledEnvironments: report.enabledEnvironments,
         environments: report.environments,
         urls: this.urlsFromReadiness(report),
+        retry: {
+          attempts: report.attempts,
+          elapsedMs: report.elapsedMs,
+        },
       },
     };
   }
@@ -922,7 +926,7 @@ export class ProvisioningStepsService {
       };
     }
     const enabled = this.enabledEnvironmentsFromProvisioning(provisioning);
-    const report = await this.frontendReadiness.verifyProvisioning({
+    const report = await this.frontendReadiness.verifyProvisioningWithRetry({
       slug: provisioning.slug,
       enabledEnvironments: enabled.map((e) => FRONTEND_TO_CAPABILITY[e]),
       urlMode,
@@ -939,6 +943,10 @@ export class ProvisioningStepsService {
         environments: report.environments,
         hosts: this.hostsFromReadiness(report),
         urls: this.urlsFromReadiness(report),
+        retry: {
+          attempts: report.attempts,
+          elapsedMs: report.elapsedMs,
+        },
       },
     };
   }

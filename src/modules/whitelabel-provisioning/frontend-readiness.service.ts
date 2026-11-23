@@ -180,6 +180,62 @@ export class FrontendReadinessService {
     };
   }
 
+  /**
+   * FE_DEPLOY_CHECK / DNS_CHECK: retry with exponential backoff after Netlify
+   * alias/SSL propagation. Bounded attempts + total wall-clock timeout.
+   */
+  async verifyProvisioningWithRetry(
+    input: {
+      slug: string;
+      enabledEnvironments?: unknown;
+      urlMode?: unknown;
+    },
+    options?: {
+      maxAttempts?: number;
+      initialDelayMs?: number;
+      maxDelayMs?: number;
+      maxTotalMs?: number;
+    },
+  ): Promise<ReadinessReport & { attempts: number; elapsedMs: number }> {
+    const maxAttempts = Math.max(1, options?.maxAttempts ?? 10);
+    const initialDelayMs = Math.max(0, options?.initialDelayMs ?? 2_000);
+    const maxDelayMs = Math.max(initialDelayMs, options?.maxDelayMs ?? 15_000);
+    const maxTotalMs = Math.max(1_000, options?.maxTotalMs ?? 120_000);
+    const started = Date.now();
+    let attempts = 0;
+    let last: ReadinessReport | null = null;
+
+    while (attempts < maxAttempts) {
+      attempts += 1;
+      last = await this.verifyProvisioning(input);
+      if (last.ok) break;
+
+      const elapsed = Date.now() - started;
+      if (attempts >= maxAttempts || elapsed >= maxTotalMs) break;
+
+      const expo = initialDelayMs * 2 ** Math.max(0, attempts - 1);
+      const delay = Math.min(maxDelayMs, expo, Math.max(0, maxTotalMs - elapsed));
+      if (delay <= 0) break;
+
+      this.logger.warn({
+        msg: 'frontend_readiness_retry_scheduled',
+        slug: input.slug,
+        attempt: attempts,
+        delayMs: delay,
+        failed: last.environments
+          .filter((e) => e.status !== 'ok')
+          .map((e) => `${e.environment}: ${e.error ?? 'failed'}`),
+      });
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+
+    return {
+      ...(last as ReadinessReport),
+      attempts,
+      elapsedMs: Date.now() - started,
+    };
+  }
+
   private async verifyOne(input: {
     env: FrontendEnvironment;
     url: string;

@@ -1,13 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { lookup } from 'node:dns/promises';
 import {
   FrontendEnvironment,
   FRONTEND_TO_CAPABILITY,
   normalizeEnabledEnvironments,
   suggestedFrontendUrls,
 } from './frontend-urls';
-import { FrontendReadinessService } from './frontend-readiness.service';
 import { scrubSecrets, truncate } from './provisioning.constants';
 
 const NETLIFY_API = 'https://api.netlify.com/api/v1';
@@ -20,21 +18,21 @@ export type NetlifyEnvironmentDomainResult = {
   host: string;
   url: string;
   siteId: string;
+  siteName: string | null;
   action: NetlifyAliasAction;
   aliasCountBefore: number;
   aliasCountAfter: number;
   ssl: {
     attempted: boolean;
     ok: boolean;
+    skipped: boolean;
     error: string | null;
+    note: string | null;
   };
-  readiness: {
-    resolves: boolean;
-    httpsOk: boolean;
-    bootstrapOk: boolean;
-    bootstrapSlug: string | null;
-    status: 'ok' | 'failed';
-    error: string | null;
+  /** Soft probe only — never gates CONFIGURE_FRONTEND_DOMAINS success. */
+  readinessProbe: {
+    attempted: boolean;
+    note: string;
   };
   error: string | null;
 };
@@ -52,16 +50,14 @@ type NetlifySite = {
   custom_domain?: string | null;
   domain_aliases?: string[] | null;
   ssl_url?: string | null;
+  default_domain?: string | null;
 };
 
 @Injectable()
 export class NetlifyDomainService {
   private readonly logger = new Logger(NetlifyDomainService.name);
 
-  constructor(
-    private readonly config: ConfigService,
-    private readonly frontendReadiness: FrontendReadinessService,
-  ) {}
+  constructor(private readonly config: ConfigService) {}
 
   accessToken(): string | null {
     const token =
@@ -124,6 +120,11 @@ export class NetlifyDomainService {
     return { aliases: [...set].sort(), alreadyPresent };
   }
 
+  /**
+   * CONFIGURE_FRONTEND_DOMAINS responsibility:
+   * ensure hostname aliases exist on shared Netlify sites (idempotent merge).
+   * DNS / HTTPS / bootstrap belong to FE_DEPLOY_CHECK and DNS_CHECK.
+   */
   async ensureHostnameAliases(input: {
     slug: string;
     enabledEnvironments?: unknown;
@@ -140,7 +141,7 @@ export class NetlifyDomainService {
       mode: 'HOSTNAME',
       slug,
       environments,
-      ok: environments.every((row) => row.error == null && row.readiness.status === 'ok'),
+      ok: environments.every((row) => row.error == null),
     };
   }
 
@@ -156,17 +157,20 @@ export class NetlifyDomainService {
       host,
       url,
       siteId: siteId || '',
+      siteName: null,
       action: 'unchanged_error',
       aliasCountBefore: 0,
       aliasCountAfter: 0,
-      ssl: { attempted: false, ok: false, error: null },
-      readiness: {
-        resolves: false,
-        httpsOk: false,
-        bootstrapOk: false,
-        bootstrapSlug: null,
-        status: 'failed',
+      ssl: {
+        attempted: false,
+        ok: false,
+        skipped: false,
         error: null,
+        note: null,
+      },
+      readinessProbe: {
+        attempted: false,
+        note: 'Deferred to FE_DEPLOY_CHECK / DNS_CHECK (retry with backoff).',
       },
       error: null,
     };
@@ -180,6 +184,7 @@ export class NetlifyDomainService {
 
     try {
       const site = await this.getSite(siteId);
+      base.siteName = site.name ?? null;
       const before = this.mergeDomainAliases(
         site.domain_aliases,
         site.custom_domain,
@@ -209,35 +214,32 @@ export class NetlifyDomainService {
         base.aliasCountAfter = before.aliases.length;
       }
 
+      // Soft SSL nudge only — shared sites already have Let's Encrypt.
+      // Empty POST often returns 422 requiring certificate payload; treat as OK.
       const ssl = await this.ensureSsl(siteId);
-      const readiness = await this.verifyHost(slug, env, url, host);
 
       return {
         ...base,
         action,
         ssl,
-        readiness,
-        error:
-          readiness.status === 'ok'
-            ? null
-            : readiness.error || `Hostname ${host} not ready`,
+        error: null,
       };
     } catch (error) {
       const message = this.safeErrorMessage(error);
-      this.logger.warn(`Netlify domain ensure failed for ${env}/${host}: ${message}`);
+      this.logger.warn(
+        `Netlify domain ensure failed for ${env}/${host}: ${message}`,
+      );
       return {
         ...base,
         error: message,
-        readiness: {
-          ...base.readiness,
-          error: message,
-        },
       };
     }
   }
 
   private async getSite(siteId: string): Promise<NetlifySite> {
-    return this.netlifyFetch<NetlifySite>(`/sites/${encodeURIComponent(siteId)}`);
+    return this.netlifyFetch<NetlifySite>(
+      `/sites/${encodeURIComponent(siteId)}`,
+    );
   }
 
   private async patchAliases(
@@ -253,51 +255,50 @@ export class NetlifyDomainService {
     );
   }
 
+  /**
+   * Best-effort SSL refresh. Shared homolog sites already hold active certs;
+   * Netlify auto-extends coverage for new aliases. Empty POST returns 422 when
+   * a certificate already exists — that is not a configure failure.
+   */
   private async ensureSsl(
     siteId: string,
   ): Promise<NetlifyEnvironmentDomainResult['ssl']> {
     try {
       await this.netlifyFetch(`/sites/${encodeURIComponent(siteId)}/ssl`, {
         method: 'POST',
-        // Empty body — Netlify provisions certs for configured custom domains.
         body: '{}',
       });
-      return { attempted: true, ok: true, error: null };
+      return {
+        attempted: true,
+        ok: true,
+        skipped: false,
+        error: null,
+        note: 'ssl_post_accepted',
+      };
     } catch (error) {
-      // Certificate may already exist or still provisioning; readiness HTTPS check is authoritative.
       const message = this.safeErrorMessage(error);
-      return { attempted: true, ok: false, error: message };
+      if (
+        /HTTP 422/.test(message) ||
+        /certificate parameter is required/i.test(message)
+      ) {
+        return {
+          attempted: true,
+          ok: true,
+          skipped: true,
+          error: null,
+          note: 'existing_certificate_managed_by_netlify',
+        };
+      }
+      // Soft: do not fail CONFIGURE_FRONTEND_DOMAINS on SSL nudge errors.
+      this.logger.warn(`Netlify SSL nudge soft-failed for ${siteId}: ${message}`);
+      return {
+        attempted: true,
+        ok: false,
+        skipped: false,
+        error: message,
+        note: 'ssl_nudge_soft_failure',
+      };
     }
-  }
-
-  private async verifyHost(
-    slug: string,
-    env: FrontendEnvironment,
-    url: string,
-    host: string,
-  ): Promise<NetlifyEnvironmentDomainResult['readiness']> {
-    let resolves = false;
-    try {
-      await lookup(host);
-      resolves = true;
-    } catch {
-      resolves = false;
-    }
-
-    const report = await this.frontendReadiness.verifyProvisioning({
-      slug,
-      enabledEnvironments: [FRONTEND_TO_CAPABILITY[env]],
-      urlMode: 'HOSTNAME',
-    });
-    const row = report.environments.find((e) => e.environment === env);
-    return {
-      resolves: resolves || Boolean(row?.resolves),
-      httpsOk: Boolean(row?.httpsOk),
-      bootstrapOk: Boolean(row?.bootstrapOk),
-      bootstrapSlug: row?.bootstrapSlug ?? null,
-      status: row?.status === 'ok' ? 'ok' : 'failed',
-      error: row?.error ?? (resolves ? null : `DNS lookup failed for ${host}`),
-    };
   }
 
   private async netlifyFetch<T>(
@@ -345,7 +346,10 @@ export class NetlifyDomainService {
     return truncate(
       raw
         .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer [REDACTED]')
-        .replace(/NETLIFY_ACCESS_TOKEN[=:]\s*\S+/gi, 'NETLIFY_ACCESS_TOKEN=[REDACTED]'),
+        .replace(
+          /NETLIFY_ACCESS_TOKEN[=:]\s*\S+/gi,
+          'NETLIFY_ACCESS_TOKEN=[REDACTED]',
+        ),
       500,
     );
   }
