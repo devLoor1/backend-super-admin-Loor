@@ -291,11 +291,17 @@ function setup() {
       }));
       return {
         mode: 'shared_frontend' as const,
+        urlMode: 'HOSTNAME' as const,
         corePublicUrl: 'https://back.loor.vc/service',
         enabledEnvironments: ['INVESTOR', 'ENTREPRENEUR', 'ADMIN'] as const,
         environments,
         ok: true,
+        dnsRequired: true,
       };
+    }),
+    verifyProvisioningWithRetry: jest.fn(async (input: { slug: string }) => {
+      const base = await frontendReadiness.verifyProvisioning(input);
+      return { ...base, attempts: 1, elapsedMs: 0 };
     }),
   };
   const netlifyDomains = {

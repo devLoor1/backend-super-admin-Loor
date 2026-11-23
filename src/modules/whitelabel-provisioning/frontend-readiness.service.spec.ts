@@ -78,4 +78,56 @@ describe('FrontendReadinessService', () => {
     expect(report.environments).toHaveLength(2);
     expect(report.environments.every((e) => e.status === 'ok')).toBe(true);
   });
+
+  it('verifyProvisioningWithRetry backs off then succeeds without infinite loop', async () => {
+    let attempts = 0;
+    jest
+      .spyOn(service, 'verifyProvisioning')
+      .mockImplementation(async () => {
+        attempts += 1;
+        const ok = attempts >= 3;
+        return {
+          mode: 'shared_frontend',
+          urlMode: 'HOSTNAME',
+          corePublicUrl: 'https://back.loor.vc/service',
+          enabledEnvironments: ['INVESTOR'],
+          environments: [
+            {
+              environment: 'investor',
+              capability: 'INVESTOR',
+              url: 'https://finapop.loor.vc',
+              host: 'finapop.loor.vc',
+              resolves: ok,
+              httpsOk: ok,
+              httpStatus: ok ? 200 : null,
+              bootstrapOk: ok,
+              bootstrapSlug: ok ? 'finapop' : null,
+              expectedSlug: 'finapop',
+              status: ok ? 'ok' : 'failed',
+              error: ok ? null : 'DNS does not resolve; fetch failed',
+            },
+          ],
+          ok,
+          dnsRequired: true,
+        };
+      });
+
+    const report = await service.verifyProvisioningWithRetry(
+      {
+        slug: 'finapop',
+        enabledEnvironments: ['INVESTOR'],
+        urlMode: 'HOSTNAME',
+      },
+      {
+        maxAttempts: 5,
+        initialDelayMs: 1,
+        maxDelayMs: 5,
+        maxTotalMs: 5_000,
+      },
+    );
+
+    expect(report.ok).toBe(true);
+    expect(report.attempts).toBe(3);
+    expect(attempts).toBe(3);
+  });
 });

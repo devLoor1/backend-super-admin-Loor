@@ -1,10 +1,7 @@
 import { NetlifyDomainService } from './netlify-domain.service';
 
 describe('NetlifyDomainService.mergeDomainAliases', () => {
-  const service = new NetlifyDomainService(
-    { get: () => undefined } as never,
-    {} as never,
-  );
+  const service = new NetlifyDomainService({ get: () => undefined } as never);
 
   it('adds a new alias without dropping existing ones', () => {
     const merged = service.mergeDomainAliases(
@@ -53,8 +50,9 @@ describe('NetlifyDomainService.ensureHostnameAliases', () => {
   });
 
   function buildService(opts?: {
-    readinessOk?: boolean;
     existingAliases?: string[];
+    sslStatus?: number;
+    sslBody?: string;
   }) {
     const config = {
       get: (key: string) => {
@@ -67,46 +65,7 @@ describe('NetlifyDomainService.ensureHostnameAliases', () => {
         return map[key];
       },
     };
-    const frontendReadiness = {
-      verifyProvisioning: jest.fn(async () => ({
-        mode: 'shared_frontend',
-        urlMode: 'HOSTNAME',
-        corePublicUrl: 'https://back.loor.vc/service',
-        enabledEnvironments: ['ADMIN'],
-        environments: [
-          {
-            environment: 'admin',
-            capability: 'ADMIN',
-            url: 'https://cliente-x.admin.loor.vc',
-            host: 'cliente-x.admin.loor.vc',
-            resolves: true,
-            httpsOk: opts?.readinessOk !== false,
-            httpStatus: 200,
-            bootstrapOk: opts?.readinessOk !== false,
-            bootstrapSlug: 'cliente-x',
-            expectedSlug: 'cliente-x',
-            status: opts?.readinessOk === false ? 'failed' : 'ok',
-            error: opts?.readinessOk === false ? 'bootstrap mismatch' : null,
-          },
-        ],
-        ok: opts?.readinessOk !== false,
-        dnsRequired: true,
-      })),
-    };
-    const service = new NetlifyDomainService(
-      config as never,
-      frontendReadiness as never,
-    );
-    jest
-      .spyOn(service as unknown as { verifyHost: (...args: unknown[]) => unknown }, 'verifyHost')
-      .mockImplementation(async () => ({
-        resolves: true,
-        httpsOk: opts?.readinessOk !== false,
-        bootstrapOk: opts?.readinessOk !== false,
-        bootstrapSlug: 'cliente-x',
-        status: opts?.readinessOk === false ? 'failed' : 'ok',
-        error: opts?.readinessOk === false ? 'bootstrap mismatch' : null,
-      }));
+    const service = new NetlifyDomainService(config as never);
 
     const aliases = opts?.existingAliases ?? ['finapop.admin.loor.vc'];
     let currentAliases = [...aliases];
@@ -114,10 +73,15 @@ describe('NetlifyDomainService.ensureHostnameAliases', () => {
       const url = String(input);
       const method = (init?.method || 'GET').toUpperCase();
       if (url.includes('/ssl') && method === 'POST') {
+        const status = opts?.sslStatus ?? 422;
         return {
-          ok: true,
-          status: 200,
-          text: async () => '{}',
+          ok: status >= 200 && status < 300,
+          status,
+          text: async () =>
+            opts?.sslBody ??
+            JSON.stringify({
+              error: 'certificate parameter is required when updating an existing certificate',
+            }),
         } as Response;
       }
       if (method === 'PATCH') {
@@ -131,6 +95,7 @@ describe('NetlifyDomainService.ensureHostnameAliases', () => {
           text: async () =>
             JSON.stringify({
               id: 'site-admin',
+              name: 'homologadmin',
               domain_aliases: currentAliases,
               custom_domain: 'homolog.admin.loor.vc',
             }),
@@ -142,6 +107,7 @@ describe('NetlifyDomainService.ensureHostnameAliases', () => {
         text: async () =>
           JSON.stringify({
             id: 'site-admin',
+            name: 'homologadmin',
             domain_aliases: currentAliases,
             custom_domain: 'homolog.admin.loor.vc',
           }),
@@ -159,6 +125,7 @@ describe('NetlifyDomainService.ensureHostnameAliases', () => {
     });
     expect(report.ok).toBe(true);
     expect(report.environments[0].action).toBe('created');
+    expect(report.environments[0].ssl.skipped).toBe(true);
     const patch = fetchMock.mock.calls.find(
       (call) => String(call[1]?.method || 'GET').toUpperCase() === 'PATCH',
     );
@@ -186,6 +153,17 @@ describe('NetlifyDomainService.ensureHostnameAliases', () => {
       (call) => String(call[1]?.method || 'GET').toUpperCase() === 'PATCH',
     );
     expect(patch).toBeUndefined();
+  });
+
+  it('does not fail CONFIGURE when readiness would be pending (alias-only success)', async () => {
+    const { service } = buildService();
+    const report = await service.ensureHostnameAliases({
+      slug: 'cliente-x',
+      enabledEnvironments: ['ADMIN'],
+    });
+    expect(report.ok).toBe(true);
+    expect(report.environments[0].error).toBeNull();
+    expect(report.environments[0].readinessProbe.attempted).toBe(false);
   });
 
   it('never logs or returns the bearer token on failure', async () => {
