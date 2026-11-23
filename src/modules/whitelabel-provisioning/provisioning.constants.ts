@@ -9,6 +9,7 @@ export const STEP_ORDER: readonly ProvisioningStepKey[] = [
   ProvisioningStepKey.TERMS,
   ProvisioningStepKey.SMTP,
   ProvisioningStepKey.GATEWAY_CONFIG,
+  ProvisioningStepKey.CONFIGURE_FRONTEND_DOMAINS,
   ProvisioningStepKey.FE_DEPLOY_CHECK,
   ProvisioningStepKey.DNS_CHECK,
   ProvisioningStepKey.VALIDATE,

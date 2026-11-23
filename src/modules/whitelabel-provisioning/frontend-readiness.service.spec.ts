@@ -28,7 +28,8 @@ describe('FrontendReadinessService', () => {
 
   it('candidateUrls HOSTNAME prefer convention then legacy aliases', () => {
     const map = service.candidateUrls('finapop', ['investor', 'admin'], 'HOSTNAME');
-    expect(map.investor[0]).toBe('https://finapop.investor.loor.vc');
+    expect(map.investor[0]).toBe('https://finapop.loor.vc');
+    expect(map.investor).toContain('https://finapop.investor.loor.vc');
     expect(map.investor).toContain('https://finapop.investidor.loor.vc');
     expect(map.admin[0]).toBe('https://finapop.admin.loor.vc');
   });

@@ -36,4 +36,17 @@ describe('frontend-urls PATH infrastructure', () => {
     process.env.PROVISIONING_FRONTEND_URL_MODE = 'PATH';
     expect(normalizeFrontendUrlMode(undefined)).toBe('PATH');
   });
+
+  it('HOSTNAME uses wildcard Hostinger convention', () => {
+    const urls = suggestedFrontendUrls(
+      'cliente-x',
+      ['investor', 'entrepreneur', 'admin'],
+      'HOSTNAME',
+    );
+    expect(urls).toEqual({
+      investor: 'https://cliente-x.loor.vc',
+      entrepreneur: 'https://cliente-x.empresa.loor.vc',
+      admin: 'https://cliente-x.admin.loor.vc',
+    });
+  });
 });

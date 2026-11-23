@@ -40,6 +40,7 @@ import {
   parseFrontendUrls,
   suggestedFrontendUrls,
 } from './frontend-urls';
+import { NetlifyDomainService } from './netlify-domain.service';
 import {
   ACTIVE_PROVISIONING_STATUSES,
   isManualGate,
@@ -95,6 +96,7 @@ export class WhitelabelProvisioningService {
     private readonly runner: ProvisioningRunnerService,
     private readonly secrets: ProvisioningSecretsStore,
     private readonly audit: AuditService,
+    private readonly netlify: NetlifyDomainService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -125,12 +127,17 @@ export class WhitelabelProvisioningService {
     // PATH mode has no per-tenant DNS — always skip DNS_CHECK.
     const skipDns =
       dto.skipDnsCheck === true || urlMode === 'PATH';
+    // PATH mode never configures Netlify aliases; HOSTNAME skips when token/site ids missing.
+    const skipFrontendDomains =
+      urlMode === 'PATH' || !this.netlify.isConfigured(
+        normalizeEnabledEnvironments(dto.enabledEnvironments),
+      );
     const now = new Date();
 
     const brandingSecret = toBrandingSecret(dto.branding, mainAreaFile);
     const plan = this.planSteps(
       dto,
-      { skipFe, skipDns, urlMode },
+      { skipFe, skipDns, skipFrontendDomains, urlMode },
       brandingSecret,
     );
 
@@ -551,6 +558,7 @@ export class WhitelabelProvisioningService {
     flags: {
       skipFe: boolean;
       skipDns: boolean;
+      skipFrontendDomains: boolean;
       urlMode: 'HOSTNAME' | 'PATH';
     },
     branding?: ProvisioningBrandingSecret,
@@ -613,6 +621,19 @@ export class WhitelabelProvisioningService {
       [ProvisioningStepKey.GATEWAY_CONFIG]: dto.gateway
         ? { payload: { itemsCount: dto.gateway.items.length } }
         : { skipReason: 'no_gateway' },
+      [ProvisioningStepKey.CONFIGURE_FRONTEND_DOMAINS]: flags.skipFrontendDomains
+        ? {
+            skipReason:
+              flags.urlMode === 'PATH'
+                ? 'not_required_path_mode'
+                : 'netlify_not_configured',
+          }
+        : {
+            payload: {
+              urlMode: flags.urlMode,
+              enabledEnvironments: enabledCapabilities,
+            },
+          },
       [ProvisioningStepKey.FE_DEPLOY_CHECK]: flags.skipFe
         ? { skipReason: 'skip_requested' }
         : {

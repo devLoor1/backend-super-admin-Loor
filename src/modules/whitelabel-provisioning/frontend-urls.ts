@@ -152,7 +152,8 @@ export function suggestedFrontendUrls(
           admin: `${bases.admin}/w/${safe}`,
         } as const)
       : ({
-          investor: `https://${safe}.investor.loor.vc`,
+          // Wildcard DNS: *.loor.vc / *.empresa.loor.vc / *.admin.loor.vc
+          investor: `https://${safe}.loor.vc`,
           entrepreneur: `https://${safe}.empresa.loor.vc`,
           admin: `https://${safe}.admin.loor.vc`,
         } as const);

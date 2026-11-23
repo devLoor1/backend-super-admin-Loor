@@ -29,6 +29,7 @@ import {
   suggestedFrontendUrls,
   urlsFromDnsHosts,
 } from './frontend-urls';
+import { NetlifyDomainService } from './netlify-domain.service';
 import {
   ProvisioningBrandingPage,
   ProvisioningSecretsStore,
@@ -117,6 +118,7 @@ export class ProvisioningStepsService {
     private readonly platformAssets: PlatformAssetsService,
     private readonly secrets: ProvisioningSecretsStore,
     private readonly frontendReadiness: FrontendReadinessService,
+    private readonly netlifyDomains: NetlifyDomainService,
   ) {}
 
   async execute(ctx: StepContext): Promise<StepOutcome> {
@@ -135,6 +137,8 @@ export class ProvisioningStepsService {
         return this.configureSmtp(ctx);
       case ProvisioningStepKey.GATEWAY_CONFIG:
         return this.configureGateway(ctx);
+      case ProvisioningStepKey.CONFIGURE_FRONTEND_DOMAINS:
+        return this.configureFrontendDomains(ctx);
       case ProvisioningStepKey.FE_DEPLOY_CHECK:
         return this.feDeployCheck(ctx);
       case ProvisioningStepKey.DNS_CHECK:
@@ -817,6 +821,67 @@ export class ProvisioningStepsService {
     );
   }
 
+  private async configureFrontendDomains({
+    provisioning,
+  }: StepContext): Promise<StepOutcome> {
+    const urlMode = this.urlModeFromProvisioning(provisioning);
+    if (urlMode === 'PATH') {
+      return {
+        status: 'SKIPPED',
+        result: {
+          reason: 'not_required_path_mode',
+          urlMode,
+          note: 'PATH mode uses shared Netlify hosts with /w/{slug}; domain aliases are not required.',
+        },
+      };
+    }
+
+    const enabled = this.enabledEnvironmentsFromProvisioning(provisioning);
+    if (!this.netlifyDomains.isConfigured(enabled)) {
+      return {
+        status: 'SKIPPED',
+        result: {
+          reason: 'netlify_not_configured',
+          urlMode,
+          note: 'NETLIFY_ACCESS_TOKEN / site ids missing — configure env to automate domain aliases.',
+        },
+      };
+    }
+
+    const report = await this.netlifyDomains.ensureHostnameAliases({
+      slug: provisioning.slug,
+      enabledEnvironments: enabled.map((e) => FRONTEND_TO_CAPABILITY[e]),
+    });
+
+    const result = scrubSecrets({
+      mode: report.mode,
+      urlMode,
+      slug: report.slug,
+      enabledEnvironments: enabled.map((e) => FRONTEND_TO_CAPABILITY[e]),
+      environments: report.environments,
+      urls: Object.fromEntries(
+        report.environments.map((row) => [
+          row.environment,
+          { url: row.url, host: row.host, action: row.action, siteId: row.siteId },
+        ]),
+      ),
+    });
+
+    if (!report.ok) {
+      const failed = report.environments
+        .filter((row) => row.error || row.readiness.status !== 'ok')
+        .map((row) => `${row.environment}: ${row.error ?? row.readiness.error ?? 'failed'}`)
+        .join('; ');
+      throw new ProvisioningStepError(
+        'E_NETLIFY_DOMAIN_CONFIG_FAILED',
+        `Netlify domain configuration failed — ${failed}`,
+        result,
+      );
+    }
+
+    return { status: 'SUCCESS', result };
+  }
+
   private async feDeployCheck({
     provisioning,
   }: StepContext): Promise<StepOutcome> {
@@ -917,6 +982,7 @@ export class ProvisioningStepsService {
       ['terms', ProvisioningStepKey.TERMS],
       ['smtp', ProvisioningStepKey.SMTP],
       ['gateway', ProvisioningStepKey.GATEWAY_CONFIG],
+      ['configure_frontend_domains', ProvisioningStepKey.CONFIGURE_FRONTEND_DOMAINS],
       ['fe_deploy_check', ProvisioningStepKey.FE_DEPLOY_CHECK],
       ['dns_check', ProvisioningStepKey.DNS_CHECK],
     ];
@@ -1073,7 +1139,7 @@ export class ProvisioningStepsService {
         note:
           urlMode === 'PATH'
             ? 'PATH mode: shared Netlify /w/{slug}. delivery.urls come from readiness (HTTPS + bootstrap?slug=).'
-            : 'HOSTNAME mode: delivery.urls come from readiness (DNS + HTTPS + bootstrap).',
+            : 'HOSTNAME mode: Netlify domain aliases + readiness (DNS + HTTPS + bootstrap). delivery.urls come from readiness.',
       },
       credentialsNote:
         'The temporary admin password is never stored; communicate it through a secure out-of-band channel.',
