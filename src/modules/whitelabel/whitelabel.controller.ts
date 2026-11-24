@@ -59,7 +59,7 @@ export class WhitelabelController {
   @ApiOperation({
     summary: 'Operational V1 — update name only',
     description:
-      'Body must be `{ name }`. slug/baseUrl rejected (400). Activate/deactivate/DELETE stay OFF for FE.',
+      'Body must be `{ name }`. slug/baseUrl/isActive rejected (400). Slug is not editable via this endpoint.',
   })
   update(
     @Param('id') id: string,
