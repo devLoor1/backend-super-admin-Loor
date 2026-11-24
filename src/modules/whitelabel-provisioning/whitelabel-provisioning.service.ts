@@ -20,6 +20,11 @@ import {
   ProvisioningBrandingDto,
 } from './dto/create-provisioning.dto';
 import { RetryProvisioningDto } from './dto/retry-provisioning.dto';
+import {
+  EnvironmentCapability,
+  UpdateEnvironmentsDto,
+} from './dto/update-environments.dto';
+import { FrontendReadinessService } from './frontend-readiness.service';
 import { ProvisioningRunnerService } from './provisioning-runner.service';
 import {
   ProvisioningBrandingFile,
@@ -33,6 +38,7 @@ import {
 } from './provisioning-steps.service';
 import {
   FRONTEND_ENVIRONMENTS,
+  CAPABILITY_TO_FRONTEND,
   FRONTEND_TO_CAPABILITY,
   FrontendEnvironment,
   normalizeEnabledEnvironments,
@@ -98,6 +104,7 @@ export class WhitelabelProvisioningService {
     private readonly secrets: ProvisioningSecretsStore,
     private readonly audit: AuditService,
     private readonly netlify: NetlifyDomainService,
+    private readonly frontendReadiness: FrontendReadinessService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -259,6 +266,212 @@ export class WhitelabelProvisioningService {
       });
     }
     return { data: this.present(row) };
+  }
+
+  /**
+   * Changes only the contracted frontend set after CREATE. Disabling is
+   * intentionally non-destructive: aliases, DNS, SSL and tenant data remain.
+   */
+  async updateEnvironments(
+    whitelabelId: string,
+    dto: UpdateEnvironmentsDto,
+    meta: RequestMeta,
+  ) {
+    if (!/^[1-9]\d*$/.test(whitelabelId)) {
+      throw new BadRequestException({
+        code: 'INVALID_WHITELABEL_ID',
+        message: 'Whitelabel id must be a positive Core numeric id',
+      });
+    }
+    const enable = dto.enable ?? [];
+    const disable = dto.disable ?? [];
+    const overlap = enable.filter((env) => disable.includes(env));
+    if (overlap.length) {
+      throw new BadRequestException({
+        code: 'E_ENVIRONMENT_ACTION_CONFLICT',
+        message: `An environment cannot be enabled and disabled together: ${overlap.join(', ')}`,
+      });
+    }
+
+    const provisioning = await this.prisma.whitelabelProvisioning.findFirst({
+      where: { whitelabelId: Number(whitelabelId) },
+      orderBy: { createdAt: 'desc' },
+      include: { steps: true },
+    });
+    if (!provisioning) {
+      throw new UnprocessableEntityException({
+        code: 'E_PROVISIONING_REQUIRED',
+        message:
+          'Environment management requires a provisioning record bound to this Whitelabel',
+      });
+    }
+    const tenantStep = provisioning.steps.find(
+      (step) => step.key === ProvisioningStepKey.CREATE_TENANT,
+    );
+    if (!tenantStep) {
+      throw new UnprocessableEntityException({
+        code: 'E_PROVISIONING_REQUIRED',
+        message:
+          'Environment management requires a CREATE_TENANT provisioning step',
+      });
+    }
+
+    const current = this.enabledEnvironmentsOf(provisioning);
+    const requestedEnable = enable.map((env) => CAPABILITY_TO_FRONTEND[env]);
+    const requestedDisable = disable.map((env) => CAPABILITY_TO_FRONTEND[env]);
+    const newlyEnabled = requestedEnable.filter((env) => !current.includes(env));
+    const newlyDisabled = requestedDisable.filter((env) => current.includes(env));
+    const next = FRONTEND_ENVIRONMENTS.filter(
+      (env) =>
+        (current.includes(env) || requestedEnable.includes(env)) &&
+        !requestedDisable.includes(env),
+    );
+    const urlMode = normalizeFrontendUrlMode(
+      (tenantStep.payload as { urlMode?: unknown } | null)?.urlMode,
+    );
+
+    let domainReport: Awaited<
+      ReturnType<NetlifyDomainService['ensureHostnameAliases']>
+    > | null = null;
+    let readiness: Awaited<
+      ReturnType<FrontendReadinessService['verifyProvisioningWithRetry']>
+    > | null = null;
+    if (newlyEnabled.length) {
+      if (urlMode === 'HOSTNAME') {
+        domainReport = await this.netlify.ensureHostnameAliases({
+          slug: provisioning.slug,
+          enabledEnvironments: newlyEnabled,
+        });
+        if (!domainReport.ok) {
+          throw new UnprocessableEntityException({
+            code: 'E_ENVIRONMENT_DOMAIN_SETUP_FAILED',
+            message: 'Netlify alias setup failed for one or more environments',
+            environments: domainReport.environments,
+          });
+        }
+      }
+      readiness = await this.frontendReadiness.verifyProvisioningWithRetry({
+        slug: provisioning.slug,
+        enabledEnvironments: newlyEnabled,
+        urlMode,
+      });
+      if (!readiness.ok) {
+        throw new UnprocessableEntityException({
+          code: 'E_ENVIRONMENT_READINESS_FAILED',
+          message: 'Frontend readiness failed for one or more environments',
+          environments: readiness.environments,
+        });
+      }
+    }
+
+    const capabilities = next.map((env) => FRONTEND_TO_CAPABILITY[env]);
+    const oldPayload = (tenantStep.payload ?? {}) as Record<string, unknown>;
+    const oldDelivery = (provisioning.delivery ?? {}) as Record<string, unknown>;
+    const oldUrls = this.jsonRecord(oldDelivery.urls);
+    const oldResidual = this.jsonRecord(oldDelivery.residualInfrastructureUrls);
+    const urls: Record<string, unknown> = {
+      ...oldUrls,
+      primary: oldUrls.primary ?? provisioning.baseUrl,
+    };
+    const residualInfrastructureUrls: Record<string, unknown> = {
+      ...oldResidual,
+    };
+    const suggestions = suggestedFrontendUrls(
+      provisioning.slug,
+      FRONTEND_ENVIRONMENTS,
+      urlMode,
+    );
+    for (const env of newlyDisabled) {
+      residualInfrastructureUrls[env] = oldUrls[env] ?? suggestions[env];
+      delete urls[env];
+    }
+    for (const row of readiness?.environments ?? []) {
+      urls[row.environment] = row.url;
+      delete residualInfrastructureUrls[row.environment];
+    }
+
+    const previousReadiness = this.jsonRecord(oldDelivery.readiness);
+    const readinessByEnvironment = this.jsonRecord(
+      previousReadiness.environments,
+    );
+    for (const row of readiness?.environments ?? []) {
+      readinessByEnvironment[row.environment] = row;
+    }
+    for (const env of newlyDisabled) {
+      const previous = this.jsonRecord(readinessByEnvironment[env]);
+      readinessByEnvironment[env] = {
+        ...previous,
+        contracted: false,
+        status: 'inactive',
+      };
+    }
+
+    await this.prisma.whitelabelProvisioningStep.update({
+      where: { id: tenantStep.id },
+      data: {
+        payload: {
+          ...oldPayload,
+          enabledEnvironments: capabilities,
+        } as Prisma.InputJsonValue,
+      },
+    });
+    await this.prisma.whitelabelProvisioning.update({
+      where: { id: provisioning.id },
+      data: {
+        delivery: {
+          ...oldDelivery,
+          name: oldDelivery.name ?? provisioning.name,
+          slug: oldDelivery.slug ?? provisioning.slug,
+          baseUrl: oldDelivery.baseUrl ?? provisioning.baseUrl,
+          whitelabelId: provisioning.whitelabelId,
+          urlMode,
+          enabledEnvironments: capabilities,
+          urls,
+          suggestedUrls: {
+            ...suggestedFrontendUrls(provisioning.slug, next, urlMode),
+            note:
+              'Only contracted environments are active. Disabled aliases, DNS and SSL are retained as residual infrastructure.',
+          },
+          residualInfrastructureUrls,
+          readiness: {
+            ...previousReadiness,
+            environments: readinessByEnvironment,
+            updatedAt: new Date().toISOString(),
+          },
+          environmentLifecycle: {
+            lastEnable: enable,
+            lastDisable: disable,
+            domainReport,
+            updatedAt: new Date().toISOString(),
+          },
+          generatedAt: new Date().toISOString(),
+          correlationId: meta.correlationId ?? null,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.safeAudit({
+      action: 'UPDATE_WHITELABEL_ENVIRONMENTS',
+      superAdminId: meta.operatorId,
+      resourceType: 'whitelabel_provisioning',
+      resourceId: provisioning.id,
+      whitelabelId: provisioning.whitelabelId,
+      beforeData: {
+        enabledEnvironments: current.map((env) => FRONTEND_TO_CAPABILITY[env]),
+      },
+      afterData: {
+        enabledEnvironments: capabilities,
+        newlyEnabled: newlyEnabled.map((env) => FRONTEND_TO_CAPABILITY[env]),
+        newlyDisabled: newlyDisabled.map((env) => FRONTEND_TO_CAPABILITY[env]),
+        aliasesRetainedOnDisable: true,
+      },
+      result: 'success',
+      correlationId: meta.correlationId,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+
+    return this.get(provisioning.id);
   }
 
   /**
@@ -584,6 +797,12 @@ export class WhitelabelProvisioningService {
       });
     }
     return row;
+  }
+
+  private jsonRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
   }
 
   /** Decides per step: payload (non-secret) and optional skip reason. */

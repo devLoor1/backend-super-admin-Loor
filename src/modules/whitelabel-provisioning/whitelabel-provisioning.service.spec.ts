@@ -265,12 +265,24 @@ function setup() {
 
   const secrets = new ProvisioningSecretsStore();
   const frontendReadiness = {
-    verifyProvisioning: jest.fn(async (input: { slug: string }) => {
+    verifyProvisioning: jest.fn(async (input: {
+      slug: string;
+      enabledEnvironments?: string[];
+    }) => {
       const slug = String(input.slug || 'acme-capital');
       const urls = feUrls(slug);
-      const environments = (
-        ['investor', 'entrepreneur', 'admin'] as const
-      ).map((environment) => ({
+      const selected = (input.enabledEnvironments?.length
+        ? input.enabledEnvironments
+        : ['investor', 'entrepreneur', 'admin']).map((environment) =>
+        environment === 'INVESTOR'
+          ? 'investor'
+          : environment === 'ENTREPRENEUR'
+            ? 'entrepreneur'
+            : environment === 'ADMIN'
+              ? 'admin'
+              : environment,
+      ) as Array<'investor' | 'entrepreneur' | 'admin'>;
+      const environments = selected.map((environment) => ({
         environment,
         capability:
           environment === 'investor'
@@ -293,7 +305,7 @@ function setup() {
         mode: 'shared_frontend' as const,
         urlMode: 'HOSTNAME' as const,
         corePublicUrl: 'https://back.loor.vc/service',
-        enabledEnvironments: ['INVESTOR', 'ENTREPRENEUR', 'ADMIN'] as const,
+        enabledEnvironments: environments.map((row) => row.capability),
         environments,
         ok: true,
         dnsRequired: true,
@@ -306,7 +318,40 @@ function setup() {
   };
   const netlifyDomains = {
     isConfigured: jest.fn(() => false),
-    ensureHostnameAliases: jest.fn(),
+    ensureHostnameAliases: jest.fn(async (input: {
+      slug: string;
+      enabledEnvironments?: string[];
+    }) => ({
+      mode: 'HOSTNAME' as const,
+      slug: input.slug,
+      environments: (input.enabledEnvironments ?? []).map((environment) => ({
+        environment,
+        capability:
+          environment === 'investor'
+            ? 'INVESTOR'
+            : environment === 'entrepreneur'
+              ? 'ENTREPRENEUR'
+              : 'ADMIN',
+        host: `${input.slug}.${environment}.example`,
+        url: feUrls(input.slug)[environment as keyof ReturnType<typeof feUrls>],
+        siteId: 'site-id',
+        siteName: 'site',
+        action: 'created' as const,
+        aliasCountBefore: 0,
+        aliasCountAfter: 1,
+        ssl: {
+          attempted: true,
+          ok: true,
+          skipped: false,
+          error: null,
+          note: null,
+        },
+        readinessProbe: { attempted: false, note: 'deferred' },
+        error: null,
+      })),
+      ok: true,
+    })),
+    removeHostnameAliases: jest.fn(),
   };
   const steps = new ProvisioningStepsService(
     fake.prisma as never,
@@ -332,6 +377,7 @@ function setup() {
     secrets,
     audit as never,
     netlifyDomains as never,
+    frontendReadiness as never,
   );
 
   return {
@@ -344,6 +390,7 @@ function setup() {
     terms,
     platformAssets,
     audit,
+    netlifyDomains,
     secrets,
     frontendReadiness,
     service,
@@ -1422,6 +1469,123 @@ describe('UPLOAD_BRAND', () => {
       'mainAreaPages',
     ]);
     expect(JSON.stringify(payload)).not.toContain('cdn.acme.example');
+  });
+
+  it('post-CREATE enable persists delivery and configures only the new environment', async () => {
+    const t = setup();
+    const created = await t.service.create(
+      baseDto({ enabledEnvironments: ['INVESTOR'] }),
+      OPERATOR,
+    );
+    t.netlifyDomains.ensureHostnameAliases.mockClear();
+    t.frontendReadiness.verifyProvisioningWithRetry.mockClear();
+
+    const updated = await t.service.updateEnvironments(
+      '42',
+      { enable: ['ADMIN'] },
+      OPERATOR,
+    );
+
+    expect(t.netlifyDomains.ensureHostnameAliases).toHaveBeenCalledTimes(1);
+    expect(t.netlifyDomains.ensureHostnameAliases).toHaveBeenCalledWith({
+      slug: 'acme-capital',
+      enabledEnvironments: ['admin'],
+    });
+    expect(t.frontendReadiness.verifyProvisioningWithRetry).toHaveBeenCalledWith({
+      slug: 'acme-capital',
+      enabledEnvironments: ['admin'],
+      urlMode: 'HOSTNAME',
+    });
+    expect(updated.data.delivery).toMatchObject({
+      enabledEnvironments: ['INVESTOR', 'ADMIN'],
+      urls: { admin: 'https://acme-capital.admin.loor.vc' },
+    });
+    expect(
+      (t.stepOf(created.data.id, K.CREATE_TENANT).payload as Row)
+        .enabledEnvironments,
+    ).toEqual(['INVESTOR', 'ADMIN']);
+  });
+
+  it('post-CREATE disable removes the contract without deleting Netlify infrastructure', async () => {
+    const t = setup();
+    await t.service.create(
+      baseDto({ enabledEnvironments: ['INVESTOR', 'ADMIN'] }),
+      OPERATOR,
+    );
+    t.netlifyDomains.ensureHostnameAliases.mockClear();
+
+    const updated = await t.service.updateEnvironments(
+      '42',
+      { disable: ['ADMIN'] },
+      OPERATOR,
+    );
+
+    expect(t.netlifyDomains.ensureHostnameAliases).not.toHaveBeenCalled();
+    expect(t.netlifyDomains.removeHostnameAliases).not.toHaveBeenCalled();
+    expect(updated.data.delivery.enabledEnvironments).toEqual(['INVESTOR']);
+    expect(updated.data.delivery.urls).not.toHaveProperty('admin');
+    expect(updated.data.delivery.residualInfrastructureUrls).toMatchObject({
+      admin: 'https://acme-capital.admin.loor.vc',
+    });
+  });
+
+  it('post-CREATE environment operations are idempotent', async () => {
+    const t = setup();
+    await t.service.create(
+      baseDto({ enabledEnvironments: ['INVESTOR'] }),
+      OPERATOR,
+    );
+    t.netlifyDomains.ensureHostnameAliases.mockClear();
+    t.frontendReadiness.verifyProvisioningWithRetry.mockClear();
+
+    const enabled = await t.service.updateEnvironments(
+      '42',
+      { enable: ['INVESTOR'] },
+      OPERATOR,
+    );
+    const disabled = await t.service.updateEnvironments(
+      '42',
+      { disable: ['ADMIN'] },
+      OPERATOR,
+    );
+
+    expect(t.netlifyDomains.ensureHostnameAliases).not.toHaveBeenCalled();
+    expect(t.frontendReadiness.verifyProvisioningWithRetry).not.toHaveBeenCalled();
+    expect(enabled.data.delivery.enabledEnvironments).toEqual(['INVESTOR']);
+    expect(disabled.data.delivery.enabledEnvironments).toEqual(['INVESTOR']);
+  });
+
+  it('post-CREATE environment updates are isolated by whitelabelId', async () => {
+    const t = setup();
+    const first = await t.service.create(
+      baseDto({ enabledEnvironments: ['INVESTOR'] }),
+      OPERATOR,
+    );
+    const second = await t.service.create(
+      baseDto({
+        name: 'Beta',
+        slug: 'beta',
+        baseUrl: 'https://beta.loor.vc',
+        enabledEnvironments: ['INVESTOR'],
+      }),
+      OPERATOR,
+    );
+    t.provisionings.find((row) => row.id === second.data.id)!.whitelabelId = 84;
+
+    await t.service.updateEnvironments(
+      '42',
+      { enable: ['ADMIN'] },
+      OPERATOR,
+    );
+
+    expect(
+      (t.stepOf(first.data.id, K.CREATE_TENANT).payload as Row)
+        .enabledEnvironments,
+    ).toEqual(['INVESTOR', 'ADMIN']);
+    expect(
+      (t.stepOf(second.data.id, K.CREATE_TENANT).payload as Row)
+        .enabledEnvironments,
+    ).toEqual(['INVESTOR']);
   });
 });
 
