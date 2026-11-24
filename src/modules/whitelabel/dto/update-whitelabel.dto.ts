@@ -4,7 +4,9 @@ import { IsString, MaxLength, MinLength } from 'class-validator';
 /**
  * Operational V1 — name-only update.
  * slug / baseUrl / isActive are rejected by ValidationPipe (forbidNonWhitelisted).
- * Activate / deactivate / DELETE stay on dedicated endpoints (FE must keep them OFF).
+ * Slug is permanently read-only here: changing it requires a future dedicated
+ * migration/rename operation (hostnames, Netlify aliases, bootstrap).
+ * Activate / deactivate / DELETE (soft) stay on dedicated lifecycle endpoints.
  */
 export class UpdateWhitelabelDto {
   @ApiProperty({ description: 'Display name only (Operational V1)' })
