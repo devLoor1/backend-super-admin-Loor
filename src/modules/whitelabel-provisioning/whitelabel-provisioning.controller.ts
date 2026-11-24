@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   ParseEnumPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -36,6 +37,7 @@ import { AuthenticatedOperator } from '../../common/interfaces/authenticated-ope
 import { CompleteManualStepDto } from './dto/complete-manual-step.dto';
 import { CreateProvisioningDto } from './dto/create-provisioning.dto';
 import { RetryProvisioningDto } from './dto/retry-provisioning.dto';
+import { UpdateEnvironmentsDto } from './dto/update-environments.dto';
 import { ProvisioningPayloadPipe } from './provisioning-payload.pipe';
 import { ProvisioningBrandingFile } from './provisioning-secrets.store';
 import { WhitelabelProvisioningService } from './whitelabel-provisioning.service';
@@ -216,5 +218,32 @@ export class WhitelabelProvisioningByTenantController {
   @ApiNotFoundResponse({ description: 'E_PROVISIONING_NOT_FOUND' })
   getByTenant(@Param('whitelabelId') whitelabelId: string) {
     return this.service.getByWl(whitelabelId);
+  }
+
+  @Patch('environments')
+  @Roles(ROLES.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Enable or disable contracted frontend environments',
+    description:
+      'Post-CREATE lifecycle operation. Enable configures only newly contracted aliases and verifies readiness; ' +
+      'disable marks environments inactive but deliberately retains Netlify aliases, DNS, SSL and tenant data. ' +
+      'Slug rename and the full provisioning pipeline are not performed.',
+  })
+  @ApiOkResponse()
+  @ApiUnprocessableEntityResponse({
+    description:
+      'E_PROVISIONING_REQUIRED when the Whitelabel has no provisioning record, or readiness/domain setup failed.',
+  })
+  updateEnvironments(
+    @Param('whitelabelId') whitelabelId: string,
+    @Body() dto: UpdateEnvironmentsDto,
+    @CurrentUser() user: AuthenticatedOperator,
+    @Req() req: Req_,
+  ) {
+    return this.service.updateEnvironments(
+      whitelabelId,
+      dto,
+      metaOf(user, req),
+    );
   }
 }

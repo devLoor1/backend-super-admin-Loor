@@ -112,7 +112,7 @@ export function normalizeFrontendUrlMode(raw: unknown): FrontendUrlMode {
 export function normalizeEnabledEnvironments(
   raw: unknown,
 ): FrontendEnvironment[] {
-  if (!Array.isArray(raw) || raw.length === 0) {
+  if (!Array.isArray(raw)) {
     return [...FRONTEND_ENVIRONMENTS];
   }
   const out: FrontendEnvironment[] = [];
@@ -134,7 +134,9 @@ export function normalizeEnabledEnvironments(
       if (!out.includes(fe)) out.push(fe);
     }
   }
-  return out.length ? out : [...FRONTEND_ENVIRONMENTS];
+  // An explicit empty array is meaningful after CREATE: all environments can
+  // be inactive. Only an absent/legacy value defaults to all three.
+  return out;
 }
 
 export function suggestedFrontendUrls(
