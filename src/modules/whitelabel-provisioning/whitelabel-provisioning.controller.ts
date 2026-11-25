@@ -220,6 +220,10 @@ export class WhitelabelProvisioningByTenantController {
     return this.service.getByWl(whitelabelId);
   }
 
+  /**
+   * Post-CREATE environment contract — enable/disable without reprovisioning.
+   * Homolog deploy marker: keep this handler registered on the live Control Plane.
+   */
   @Patch('environments')
   @Roles(ROLES.SUPER_ADMIN)
   @ApiOperation({
