@@ -63,6 +63,25 @@ export class PlatformAssetsController {
     );
   }
 
+  @Post('logo/remove-background')
+  @Roles(ROLES.SUPER_ADMIN)
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Preview logo background removal without persisting' })
+  @UseInterceptors(
+    FileInterceptor('image', {
+      storage: memoryStorage(),
+      limits: { fileSize: 20 * 1024 * 1024 },
+    }),
+  )
+  removeBackgroundPreview(
+    @Param('whitelabelId') whitelabelId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: Request & { correlationId?: string },
+  ) {
+    this.assertFile(file);
+    return this.service.removeBackgroundPreview(whitelabelId, file, req.correlationId);
+  }
+
   @Get(':assetRef')
   @Roles(ROLES.SUPER_ADMIN, ROLES.READ_ONLY)
   get(
@@ -87,16 +106,23 @@ export class PlatformAssetsController {
     @Param('whitelabelId') whitelabelId: string,
     @UploadedFile() file: Express.Multer.File,
     @Body('slot') slot: string | undefined,
+    @Body('remove_background') removeBackground: string | undefined,
     @CurrentUser() user: AuthenticatedOperator,
     @Req() req: Request & { correlationId?: string },
   ) {
     this.assertFile(file);
-    return this.service.upload(whitelabelId, file, slot || 'main_area', {
-      operatorId: user.id,
-      correlationId: req.correlationId,
-      ip: req.ip,
-      userAgent: req.headers['user-agent'],
-    });
+    return this.service.upload(
+      whitelabelId,
+      file,
+      slot || 'main_area',
+      {
+        operatorId: user.id,
+        correlationId: req.correlationId,
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      },
+      { removeBackground: removeBackground === '1' || removeBackground === 'true' },
+    );
   }
 
   @Put(':assetRef')
@@ -112,16 +138,23 @@ export class PlatformAssetsController {
     @Param('whitelabelId') whitelabelId: string,
     @Param('assetRef') assetRef: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body('remove_background') removeBackground: string | undefined,
     @CurrentUser() user: AuthenticatedOperator,
     @Req() req: Request & { correlationId?: string },
   ) {
     this.assertFile(file);
-    return this.service.replace(whitelabelId, assetRef, file, {
-      operatorId: user.id,
-      correlationId: req.correlationId,
-      ip: req.ip,
-      userAgent: req.headers['user-agent'],
-    });
+    return this.service.replace(
+      whitelabelId,
+      assetRef,
+      file,
+      {
+        operatorId: user.id,
+        correlationId: req.correlationId,
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      },
+      { removeBackground: removeBackground === '1' || removeBackground === 'true' },
+    );
   }
 
   @Delete(':assetRef')
