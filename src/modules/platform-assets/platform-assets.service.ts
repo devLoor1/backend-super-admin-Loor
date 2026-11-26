@@ -99,8 +99,30 @@ export class PlatformAssetsService {
     return result.data;
   }
 
-  async upload(whitelabelId: string, file: Express.Multer.File, slot: string, meta: AuditMeta) {
-    const form = this.toForm(file, slot);
+  async removeBackgroundPreview(
+    whitelabelId: string,
+    file: Express.Multer.File,
+    correlationId?: string,
+  ) {
+    const form = this.toForm(file);
+    const result = await this.core.request({
+      method: 'POST',
+      path: `${this.base(whitelabelId)}/logo/remove-background`,
+      body: form,
+      multipart: true,
+      correlationId,
+    });
+    return result.data;
+  }
+
+  async upload(
+    whitelabelId: string,
+    file: Express.Multer.File,
+    slot: string,
+    meta: AuditMeta,
+    options: { removeBackground?: boolean } = {},
+  ) {
+    const form = this.toForm(file, slot, options.removeBackground);
     try {
       const result = await this.core.request({
         method: 'POST',
@@ -122,6 +144,7 @@ export class PlatformAssetsService {
           sizeBytes: file.size,
           originalName: file.originalname,
           assetRef,
+          removeBackground: !!options.removeBackground,
         },
         result: 'success',
         correlationId: meta.correlationId,
@@ -135,7 +158,7 @@ export class PlatformAssetsService {
         superAdminId: meta.operatorId,
         resourceType: 'platform_asset',
         whitelabelId: Number(whitelabelId) || null,
-        afterData: { slot },
+        afterData: { slot, removeBackground: !!options.removeBackground },
         result: 'failed',
         correlationId: meta.correlationId,
         ip: meta.ip,
@@ -150,8 +173,9 @@ export class PlatformAssetsService {
     assetRef: string,
     file: Express.Multer.File,
     meta: AuditMeta,
+    options: { removeBackground?: boolean } = {},
   ) {
-    const form = this.toForm(file);
+    const form = this.toForm(file, undefined, options.removeBackground);
     try {
       const result = await this.core.request({
         method: 'PUT',
@@ -166,7 +190,12 @@ export class PlatformAssetsService {
         resourceType: 'platform_asset',
         resourceId: assetRef,
         whitelabelId: Number(whitelabelId) || null,
-        afterData: { assetRef, mime: file.mimetype, sizeBytes: file.size },
+        afterData: {
+          assetRef,
+          mime: file.mimetype,
+          sizeBytes: file.size,
+          removeBackground: !!options.removeBackground,
+        },
         result: 'success',
         correlationId: meta.correlationId,
         ip: meta.ip,
@@ -225,11 +254,12 @@ export class PlatformAssetsService {
     }
   }
 
-  private toForm(file: Express.Multer.File, slot?: string) {
+  private toForm(file: Express.Multer.File, slot?: string, removeBackground?: boolean) {
     const FormDataCtor = (globalThis as unknown as { FormData: typeof FormData }).FormData;
     const BlobCtor = (globalThis as unknown as { Blob: typeof Blob }).Blob;
     const form = new FormDataCtor();
     if (slot) form.append('slot', slot);
+    if (removeBackground) form.append('remove_background', '1');
     const bytes = Uint8Array.from(file.buffer);
     form.append(
       'image',
