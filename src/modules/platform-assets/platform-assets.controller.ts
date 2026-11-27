@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Post,
   Put,
@@ -64,6 +65,7 @@ export class PlatformAssetsController {
   }
 
   @Post('logo/remove-background')
+  @HttpCode(200)
   @Roles(ROLES.SUPER_ADMIN)
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ summary: 'Preview logo background removal without persisting' })
@@ -83,6 +85,7 @@ export class PlatformAssetsController {
   }
 
   @Post(':assetRef/remove-background')
+  @HttpCode(200)
   @Roles(ROLES.SUPER_ADMIN)
   @ApiOperation({ summary: 'Remove background from an existing logo asset in place' })
   reprocessLogoBackground(
