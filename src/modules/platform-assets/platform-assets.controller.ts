@@ -82,6 +82,23 @@ export class PlatformAssetsController {
     return this.service.removeBackgroundPreview(whitelabelId, file, req.correlationId);
   }
 
+  @Post(':assetRef/remove-background')
+  @Roles(ROLES.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Remove background from an existing logo asset in place' })
+  reprocessLogoBackground(
+    @Param('whitelabelId') whitelabelId: string,
+    @Param('assetRef') assetRef: string,
+    @CurrentUser() user: AuthenticatedOperator,
+    @Req() req: Request & { correlationId?: string },
+  ) {
+    return this.service.reprocessLogoBackground(whitelabelId, assetRef, {
+      operatorId: user.id,
+      correlationId: req.correlationId,
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
   @Get(':assetRef')
   @Roles(ROLES.SUPER_ADMIN, ROLES.READ_ONLY)
   get(
