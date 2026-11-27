@@ -110,8 +110,10 @@ export class PlatformAssetsService {
       path: `${this.base(whitelabelId)}/logo/remove-background`,
       body: form,
       multipart: true,
+      timeoutMs: 90_000,
       correlationId,
     });
+    // Always return Core's { data: { mime, method, width, height, content_base64 } } shape.
     return result.data;
   }
 
