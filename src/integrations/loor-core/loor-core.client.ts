@@ -41,7 +41,8 @@ export class LoorCoreClient {
         ...(options.headers || {}),
       };
       // Multipart must let axios set Content-Type with boundary.
-      if (!options.multipart) {
+      // Bodyless POSTs must not force application/json (breaks some Core parsers).
+      if (!options.multipart && options.body !== undefined) {
         headers['Content-Type'] = 'application/json';
       }
 
