@@ -172,6 +172,7 @@ export class PlatformAssetsService {
         path: this.base(whitelabelId),
         body: form,
         multipart: true,
+        timeoutMs: options.removeBackground ? 90_000 : undefined,
         correlationId: meta.correlationId,
       });
       const assetRef = (result.data as { data?: { asset_ref?: string } })?.data?.asset_ref;
