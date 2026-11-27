@@ -117,6 +117,47 @@ export class PlatformAssetsService {
     return result.data;
   }
 
+  async reprocessLogoBackground(
+    whitelabelId: string,
+    assetRef: string,
+    meta: AuditMeta,
+  ) {
+    try {
+      const result = await this.core.request({
+        method: 'POST',
+        path: `${this.base(whitelabelId)}/${encodeURIComponent(assetRef)}/remove-background`,
+        timeoutMs: 90_000,
+        correlationId: meta.correlationId,
+      });
+      await this.safeAudit({
+        action: 'REPROCESS_LOGO_BACKGROUND',
+        superAdminId: meta.operatorId,
+        resourceType: 'platform_asset',
+        resourceId: assetRef,
+        whitelabelId: Number(whitelabelId) || null,
+        afterData: { assetRef, removeBackground: true },
+        result: 'success',
+        correlationId: meta.correlationId,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
+      return result.data;
+    } catch (error) {
+      await this.safeAudit({
+        action: 'REPROCESS_LOGO_BACKGROUND',
+        superAdminId: meta.operatorId,
+        resourceType: 'platform_asset',
+        resourceId: assetRef,
+        whitelabelId: Number(whitelabelId) || null,
+        result: 'failed',
+        correlationId: meta.correlationId,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
+      throw error;
+    }
+  }
+
   async upload(
     whitelabelId: string,
     file: Express.Multer.File,
